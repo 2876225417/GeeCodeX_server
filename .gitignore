@@ -1,5 +1,4 @@
-
+.cache
 build
-build_bak_*
-*-build
 package
+3rdparty

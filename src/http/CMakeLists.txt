@@ -16,21 +16,17 @@ add_library(http
     ${CMAKE_SOURCE_DIR}/include/json.hpp
 )
 
-target_include_directories(http 
-    PUBLIC
-    ${OpenCV_INCLUDE_DIRS}
-)
+# target_include_directories(http 
+#     PUBLIC
+#     ${OpenCV_INCLUDE_DIRS}
+# )
 
 target_link_libraries(http
     PRIVATE
     Boost::boost
-    ${OpenCV_LIBS}
+    # ${OpenCV_LIBS}
 )
 
 
 
-if (DATABASE STREQUAL "MYSQL")
-    target_link_libraries(http PUBLIC mysql::concpp)
-elseif (DATABASE STREQUAL "PGSQL")
-    target_link_libraries(http PUBLIC pqxx)
-endif()
+target_link_libraries(http PUBLIC pqxx)

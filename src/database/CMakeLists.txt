@@ -11,11 +11,7 @@ add_library(db
     ${DB_SOURCE}
 )
 
-if (DATABASE STREQUAL "MYSQL")
-    target_link_libraries(db PUBLIC mysql::concpp)
-elseif (DATABASE STREQUAL "PGSQL")
-    target_link_libraries(db PUBLIC pqxx)
-endif()
+target_link_libraries(db PUBLIC pqxx)
 
 
 
