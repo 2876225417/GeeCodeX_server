@@ -18,7 +18,7 @@
 
 #include <pqxx/pqxx>
 
-namespace inf_qwq::database {
+namespace geecodex::database {
 
 enum class Db_Type { PostgreSQL, MySQL };
 
@@ -204,12 +204,13 @@ private:
         {
         if (config.is_valid()) {
             if (m_config.port() == 0) {
-                const_cast<connection_config&>(m_config) = connection_config( m_config.host()
-                                                                            , traits::default_port
-                                                                            , m_config.db_name()
-                                                                            , m_config.user()
-                                                                            , m_config.password()
-                                                                            );
+                const_cast<connection_config&>(m_config) 
+                    = connection_config( m_config.host()
+                                       , traits::default_port
+                                       , m_config.db_name()
+                                       , m_config.user()
+                                       , m_config.password()
+                                       );
             }
             reconnect();
         }        
@@ -220,7 +221,6 @@ private:
 };
 
 using pg_connection = connection_manager<Db_Type::PostgreSQL>;
-
 } // namespace inf_qwq
 
 

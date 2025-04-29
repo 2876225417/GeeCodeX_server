@@ -3,47 +3,54 @@
 #ifndef HTTP_IMPL_HPP
 #define HTTP_IMPL_HPP
 
-//#include <http/http_connection.hpp>
-#include <unordered_map>
-#include <boost/beast/http.hpp>
+#include <json.hpp>
+#include <pqxx/pqxx>
 #include <http/http_connection.h>
 
-namespace inf_qwq::http {
+namespace geecodex::http {
 
-class http_connection;
-
-
-enum class http_method {
-    GET,
-    POST,
-    PUT,
-    DELETE,
-    UNKNOWN
-};
-
-inline http_method enum2method(http::verb method) {
-    switch (method) {
-        case http::verb::get: return http_method::GET;
-        case http::verb::post: return http_method::POST;
-        case http::verb::put: return http_method::PUT;
-        case http::verb::delete_: return http_method::DELETE;
-        default: return http_method::UNKNOWN;
+    inline void handle_hello(http_connection& conn) { 
+        auto& m_response = conn.response();
+        m_response.set(http::field::content_type, "text/plain");
+        m_response.body() = "Hello C++";
     }
-}
-
-
     
-// void handle_hello(http_connection& conn);
-// void handle_health_check(http_connection& conn);
-// void handle_get_all_rtsp_sources(http_connection& conn);
-// void handle_add_rtsp_source(http_connection& conn);
-// void handle_update_cropped_coords(http_connection& conn);
-// void handle_update_inf_result(http_connection& conn);
-//void handle_not_found(http_connection& conn);
-
-
-//const std::unordered_map<api_route, route_handler_func>& get_route_handlers();
-
+    inline void handle_health_check(http_connection& conn) {
+        auto& m_response = conn.response();
+        try {
+            bool database_connected = false;
+            try {
+                pqxx::result result = execute_query("SELECT 1");
+                database_connected = !result.empty();
+            } catch (const std::exception& e) {
+                database_connected = false;
+            }
+    
+            nlohmann::json response_json;
+            response_json["status"] = "ok";
+            response_json["timestamp"] = std::time(nullptr);
+            response_json["service"] = "rtsp-monitor-server";
+            response_json["database_connected"] = database_connected;
+    
+            m_response.result(http::status::ok);
+            m_response.set(http::field::content_type, "application/json");
+            m_response.body() = response_json.dump();
+    
+            std::cout << "Health check request processed" << std::endl;
+        } catch (const std::exception& e) {
+            nlohmann::json error_json;
+            error_json["status"] = "error";
+            error_json["error"] = "Error processing health check: " + std::string(e.what());
+                
+            m_response.result(http::status::internal_server_error);
+            m_response.set(http::field::content_type, "application/json");
+            m_response.body() = error_json.dump();
+    
+            std::cerr << "Error during health check: " << e.what();
+        }
+    }
+    
+    inline void handle_not_found(http_connection& conn) { }
 
 }
 #endif // HTTP_IMPL_HPP

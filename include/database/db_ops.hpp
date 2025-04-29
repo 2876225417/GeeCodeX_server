@@ -13,7 +13,7 @@
 
  
 
-namespace inf_qwq::database {
+namespace geecodex::database {
     inline int execute_non_query(const std::string& sql) {
         try {
             auto& conn = pg_connection::get_instance();

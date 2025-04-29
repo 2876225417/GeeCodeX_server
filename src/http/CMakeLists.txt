@@ -10,9 +10,9 @@ FILE(GLOB HTTP_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
 
 add_library(http 
     SHARED
+    ${HTTP_SOURCE}
     ${HTTP_HEADER}
     ${HTTP_TEMPLATE}
-    ${HTTP_SOURCE}
     ${CMAKE_SOURCE_DIR}/include/json.hpp
 )
 

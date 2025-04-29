@@ -11,8 +11,8 @@
 #include <memory>
 #include <iostream>
 
-namespace inf_qwq {
-    namespace http {
+namespace geecodex {
+    namespace http { 
         class http_server {
         public: 
             explicit http_server( net::io_context& io_ctx
