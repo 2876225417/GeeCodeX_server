@@ -77,6 +77,7 @@ namespace geecodex::http {
     static constexpr route_info route_definitions[] = {
     {"/geecodex/hello",     http_method::GET,   api_route::HELLO},
     {"/geecodex/health",    http_method::GET,   api_route::HEALTH_CHECK}
+    {"/geecodex/", }
     };
     static constexpr auto route_table = static_route_table(route_definitions);
     /* ----Route Table Parser---- */
@@ -85,6 +86,7 @@ namespace geecodex::http {
 
     void handle_hello(http_connection& conn);
     void handle_health_check(http_connection& conn);
+    void handle_download_file(http_connection& conn);
     void handle_not_found(http_connection& conn);
 
     using route_handler_func = std::function<void(http_connection&)>;
