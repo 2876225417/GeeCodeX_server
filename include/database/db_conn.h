@@ -14,15 +14,9 @@
 #include <variant>
 #include <type_traits>
 #include <string_view>
-#ifdef USE_PGSQL
-#include <pqxx/pqxx>
-#endif
 
-#ifdef USE_MYSQL
-#include <mysqlx/xdevapi.h>
-#include <mysqlx/devapi/common.h>
-#include <mysqlx/devapi/settings.h>
-#endif
+
+#include <pqxx/pqxx>
 
 namespace inf_qwq::database {
 
@@ -115,7 +109,6 @@ public:
 template <Db_Type T> struct db_connection_traits{};
 template <Db_Type T> class connection_manager;
 
-#ifdef USE_PGSQL
 template <>
 struct db_connection_traits<Db_Type::PostgreSQL> {
     using connection_type = pqxx::connection;
@@ -145,51 +138,6 @@ struct db_connection_traits<Db_Type::PostgreSQL> {
         }
     }
 };
-#endif
-
-#ifdef USE_MYSQL
-template <>
-struct db_connection_traits<Db_Type::MySQL> {
-    using connection_type = mysqlx::Session;
-    using exception_type  = database_exception;
-    static constexpr int default_port = 33060;
-
-    static std::unique_ptr<mysqlx::Session> 
-    create_connection(const connection_config& config) {
-        try {
-            int port = config.port() == 0 ? default_port : config.port();
-
-            mysqlx::SessionSettings settings( config.host() 
-                                            , port
-                                            , config.user()
-                                            , config.password()
-                                            , config.db_name()
-                                            );
-            return std::make_unique<mysqlx::Session>(settings);
-        } catch (const mysqlx::Error& e) {
-            throw exception_type("MySQL X DevAPI error: " + std::string(e.what()));
-        } catch (const std::exception& e) {
-           throw exception_type("MySQL connection error: " + std::string(e.what()));
-        }
-    }
-
-    static bool
-    is_connection_valid(mysqlx::Session& session) {
-        try {
-            test_connection(session);
-            return true;
-        } catch (...) { return false; }
-    }
-
-    static void
-    test_connection(mysqlx::Session& session) {
-        try { session.sql("SELECT 1").execute(); }
-        catch (const std::exception& e) {
-            throw exception_type("MySQL connection test failed: " + std::string(e.what()));
-        }
-    }
-};
-#endif 
 
 template <Db_Type T>
 class connection_manager {
@@ -264,21 +212,14 @@ private:
                                                                             );
             }
             reconnect();
-        }
-        
+        }        
     }
 
     connection_config m_config;
     std::unique_ptr<connection_type> m_connection;
 };
 
-#ifdef USE_PGSQL
 using pg_connection = connection_manager<Db_Type::PostgreSQL>;
-#endif
-
-#ifdef USE_MYSQL
-using mysql_connection = connection_manager<Db_Type::MySQL>;
-#endif
 
 } // namespace inf_qwq
 

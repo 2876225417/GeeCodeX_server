@@ -28,6 +28,8 @@
 
 
 #include <pqxx/internal/statement_parameters.hxx>
+#include <pqxx/result.hxx>
+
 
 namespace inf_qwq::http {
     using json      = nlohmann::json;
