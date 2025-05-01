@@ -47,13 +47,18 @@ namespace geecodex::http {
     enum class api_route {
         HELLO,
         HEALTH_CHECK,
+        DOWNLOAD_PDF,
+        FETCH_ALL_PDF_INFO,
         UNKNOWN
     };
+
+    enum class route_match_type { EXACT, PREFIX };
 
     struct route_info {
         std::string_view path;
         http_method method;
         api_route route;
+        route_match_type match_type{route_match_type::EXACT};
     };
 
     template <size_t N>
@@ -67,17 +72,27 @@ namespace geecodex::http {
         constexpr static_route_table(const route_info (&init)[N])
             : static_route_table(init, std::make_index_sequence<N>{}) {}
     
-        constexpr api_route find(std::string_view path, http_method method) const {
-            for (const auto& route: routes) 
-                if (route.path == path && route.method == method) return route.route;   
+        api_route find(std::string_view path, http_method method) const {
+            for (const auto& route: routes) { 
+                if (route.match_type == route_match_type::EXACT &&
+                    route.path == path &&
+                    route.method == method) return route.route;
+            }   
+            
+            for (const auto& route: routes) {
+                if (route.match_type == route_match_type::PREFIX && 
+                    path.size() >= route.path.size() && 
+                    path.substr(0, route.path.size()) == route.path &&
+                    route.method == method) return route.route;
+            }
             return api_route::UNKNOWN;
         }
     };
 
     static constexpr route_info route_definitions[] = {
     {"/geecodex/hello",     http_method::GET,   api_route::HELLO},
-    {"/geecodex/health",    http_method::GET,   api_route::HEALTH_CHECK}
-    {"/geecodex/", }
+    {"/geecodex/health",    http_method::GET,   api_route::HEALTH_CHECK},
+    {"/geecodex/books/",    http_method::GET, api_route::DOWNLOAD_PDF, route_match_type::PREFIX}
     };
     static constexpr auto route_table = static_route_table(route_definitions);
     /* ----Route Table Parser---- */
@@ -87,6 +102,7 @@ namespace geecodex::http {
     void handle_hello(http_connection& conn);
     void handle_health_check(http_connection& conn);
     void handle_download_file(http_connection& conn);
+    void handle_download_pdf(http_connection& conn);
     void handle_not_found(http_connection& conn);
 
     using route_handler_func = std::function<void(http_connection&)>;
@@ -94,12 +110,10 @@ namespace geecodex::http {
         static const std::unordered_map<api_route, route_handler_func> handlers = {
             {api_route::HELLO, handle_hello},
             {api_route::HEALTH_CHECK, handle_health_check},
+            {api_route::DOWNLOAD_PDF, handle_download_pdf},
             {api_route::UNKNOWN, handle_not_found},
         };
         return handlers;
     }
-
-
-
 }
 #endif // ROUTER_HPP

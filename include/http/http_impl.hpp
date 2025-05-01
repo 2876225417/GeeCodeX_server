@@ -1,9 +1,15 @@
 #ifndef HTTP_IMPL_HPP
 #define HTTP_IMPL_HPP
 
+#include <boost/beast/http/field.hpp>
+#include <boost/beast/http/string_body_fwd.hpp>
+#include <exception>
 #include <json.hpp>
 #include <pqxx/pqxx>
 #include <http/http_connection.h>
+#include <filesystem>
+#include <boost/beast/http/file_body.hpp>
+#include <regex>
 
 namespace geecodex::http {
 inline void handle_hello(http_connection& conn) { 
@@ -46,10 +52,40 @@ inline void handle_health_check(http_connection& conn) {
         std::cerr << "Error during health check: " << e.what();
     }
 }
-    
-inline void handle_not_found(http_connection& conn) { }
+
+namespace fs = std::filesystem;
+using json = nlohmann::json;
+
+inline void handle_download_pdf(http_connection& conn) {
+    try {
+        auto& request = conn.request();
+
+        std::string target = std::string(request.target());
+        std::cout << "Target path: " << target << std::endl;
+
+        std::regex id_pattern("/geecodex/books/(\\d+)/pdf");
+        std::smatch matches;
+
+        if (!std::regex_search(target, matches, id_pattern) || matches.size() < 2) {
+            std::cout << "Invalid path format: " << target << std::endl;
+            http::response<http::string_body> response{http::status::bad_request, request.version()};
+            response.set(http::field::content_type, "application/json");
+            response.body() = R"({"error": "Invalid book ID format"})";
+            response.prepare_payload();
+            conn.send(std::move(response));
+            return;
+        }
+
+    } catch (const std::exception& e) {
+
+    }
+
+}
 
 
+inline void handle_not_found(http_connection& conn) { 
+
+}
 
 }
 #endif // HTTP_IMPL_HPP

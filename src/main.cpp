@@ -34,9 +34,6 @@
  *    ./geecodex_server 0.0.0.0 8080 localhost 5432 db_name db_user db_pwd
  */
 
-std::atomic<bool> running{true};
-void signal_handler(int signal) { running = false; }
-
 int main(int argc, char* argv[]) {    
     using namespace geecodex::database;
     using namespace geecodex::http;
@@ -56,9 +53,6 @@ int main(int argc, char* argv[]) {
                             , argv[7]
                             };
     
-    std::signal(SIGINT, signal_handler);
-    std::signal(SIGTERM, signal_handler);
-
     try {
         auto& db = pg_connection::get_instance(config);
         if (!db.is_initialized()) {
@@ -72,28 +66,11 @@ int main(int argc, char* argv[]) {
 
         net::io_context ioc{1};
         http_server server{ioc, {address, port}};
-        server.run();
         
         std::cout << "HTTP server started at " << argv[1] << ":" << argv[2] << '\n'
                   << "Press Ctrl+C to stop the server" << '\n';
-
-        std::thread http_thread([&ioc]() {
-            try {
-                ioc.run();
-            } catch (const std::exception& e) {
-                std::cerr << "HTTP server error: " << e.what() << std::endl;
-            }
-        });
-
-        while (running) { std::this_thread::sleep_for(std::chrono::milliseconds(100)); }
-
-        std::cout << "Stopping all services..." << std::endl;
-        ioc.stop();
-        
-        if (http_thread.joinable()) {
-            http_thread.join();
-        }
-
+        server.run();
+        ioc.run();
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
         return EXIT_FAILURE;

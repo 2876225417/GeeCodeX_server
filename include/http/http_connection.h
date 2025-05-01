@@ -3,6 +3,10 @@
 
 
 
+#include <boost/beast/core/error.hpp>
+#include <boost/beast/http/file_body_fwd.hpp>
+#include <boost/beast/http/message_fwd.hpp>
+#include <boost/beast/http/write.hpp>
 #include <database/db_conn.h>
 #include <database/db_ops.hpp>
 #include <http/router.hpp>
@@ -39,12 +43,30 @@ public:
     http::request<http::string_body>& request() { return m_request; }
     http::response<http::string_body>& response() { return m_response; }
 
+    void send(http::response<http::string_body>&& response) {
+        auto self = shared_from_this();
+        response.prepare_payload();
+        http::async_write(m_socket, response, [self](beast::error_code ec, std::size_t) { 
+            if (ec) std::cerr << "Error writing response: " << ec.message() << '\n';
+            self->m_socket.shutdown(tcp::socket::shutdown_send, ec);
+            });
+    }  
+
+    void send(http::response<http::file_body>&& response) {
+        auto self = shared_from_this();
+        http::async_write(m_socket, response, [self](beast::error_code ec, std::size_t) {
+            if (ec) std::cerr << "Error writing file response: " << ec.message() << '\n';
+            self->m_socket.shutdown(tcp::socket::shutdown_send, ec);
+        });     
+    }
+
 private: 
     tcp::socket                         m_socket;
     beast::flat_buffer                  m_buffer{8192};
     http::request<http::string_body>    m_request;
     http::response<http::string_body>   m_response;
 
+    
     void read_request() {
         auto self = shared_from_this();
                         
