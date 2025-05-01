@@ -19,7 +19,6 @@
 #include <boost/core/ignore_unused.hpp>
 
 namespace geecodex::http {
-
     namespace beast = boost::beast;
     namespace http  = beast::http;
     namespace net   = boost::asio;
@@ -92,11 +91,12 @@ namespace geecodex::http {
     static constexpr route_info route_definitions[] = {
     {"/geecodex/hello",     http_method::GET,   api_route::HELLO},
     {"/geecodex/health",    http_method::GET,   api_route::HEALTH_CHECK},
-    {"/geecodex/books/",    http_method::GET, api_route::DOWNLOAD_PDF, route_match_type::PREFIX}
+    {"/geecodex/books/",    http_method::GET,   api_route::DOWNLOAD_PDF, route_match_type::PREFIX}
     };
     static constexpr auto route_table = static_route_table(route_definitions);
     /* ----Route Table Parser---- */
-
+    
+    
     class http_connection;
 
     void handle_hello(http_connection& conn);
