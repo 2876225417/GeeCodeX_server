@@ -106,26 +106,37 @@ public:
 
     void send(http::response<http::file_body>&& response) {
         try {
-            auto shared_response = std::make_shared<http::response<http::string_body>>(std::move(response));
+            auto shared_response = std::make_shared<http::response<http::file_body>>(std::move(response));
             auto self = shared_from_this();
             m_response_sent = true;
-            
-            http::async_write(m_socket, *shared_response, [self](beast::error_code ec, std::size_t bytes) {
-                try {
-                    if (ec) std::cerr << "Error writing file response: " << ec.message() << '\n';
-                    else std::cout << "File response sent successfully (" << bytes << " bytes)" << std::endl;
-                    beast::error_code shutdown_ec;
-                    self->m_socket.shutdown(tcp::socket::shutdown_send, shutdown_ec);
-                    if (shutdown_ec && shutdown_ec != beast::errc::not_connected) {
-                        std::cerr << "Error shutting down socket: " << shutdown_ec.message() << '\n';
-                    } else std::cout << "Socket shutdown successfully" << std::endl;
-                } catch (const std::exception& e) {
-                    std::cerr << "Exception in file send completion handler: " << e.what() << '\n'; 
-                } catch (...) {
-                    std::cerr << "Unknown exception in file send completion handler" << '\n';
-                } 
-            });
-        } catch( const std::exception& e) {
+        
+            std::cout << "Starting file transfer Size: " 
+                      << (shared_response->body().size() / (1024.f * 1024.f))
+                      << " MB" << std::endl; 
+
+            http::async_write( m_socket, *shared_response
+                             , [self, shared_response](beast::error_code ec, std::size_t bytes) {
+                                    try {
+                                        if (ec) std::cerr << "Error writing file response: " << ec.message() << '\n';
+                                        else std::cout << "File response sent successfully ("
+                                                       << (bytes / (1024.f * 1024.f))
+                                                       << " MB)" << std::endl;
+
+                                        if (!ec) {
+                                            beast::error_code shutdown_ec;
+                                            self->m_socket.shutdown(tcp::socket::shutdown_send, shutdown_ec);
+                                            if (shutdown_ec && shutdown_ec != beast::errc::not_connected)
+                                                std::cerr << "Error shutting down socket: " << shutdown_ec.message() << '\n';
+                                            else std::cout << "Socket shutdown successfully" << std::endl;
+                                        }
+                                    } catch (const std::exception& e) {
+                                        std::cerr << "Exception in file send completion handler: " << e.what() << '\n';
+                                    } catch (...) { 
+                                        std::cerr << "Unknown exception in file send completion handler" << '\n';
+                                    }
+                             });
+
+        } catch (const std::exception& e) {
             std::cerr << "Exception in send(file_body): " << e.what() << std::endl;
             try {
                 if (!m_response_sent) {
@@ -137,7 +148,7 @@ public:
 
                     m_socket.write_some(net::buffer(error_response.body()));
                     m_socket.shutdown(tcp::socket::shutdown_send);
-                }    
+                }
             } catch (...) {
                 std::cerr << "Failed to send error response" << '\n';
             }
