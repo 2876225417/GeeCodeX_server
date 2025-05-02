@@ -402,5 +402,106 @@ inline void handle_fetch_pdf_cover(http_connection& conn) {
         send_json_error(conn, http::status::internal_server_error, "Unknown internal error");
     }
 }
+
+inline void handle_fetch_latest_books(http_connection& conn) {
+    try {
+        std::cout << "Handling fetch latest books request" << std::endl;
+        auto& request = conn.request();
+
+        std::string sql = 
+            "SELECT "
+            "   id, title, author, isbn, publisher, publish_date, language, "
+            "   page_count, description, created_at, tags, download_count "
+            "FROM "
+            "   codex_books "
+            "WHERE "
+            "   is_active = TRUE "
+            "   ORDER BY "
+            "   created_at DESC "
+            "LIMIT 5;";
+
+        pqxx::result result;
+        try {
+            result = execute_query(sql);
+            std::cout << "Fetched " << result.size() << " latest books from database." << std::endl;
+        } catch (const database::database_exception& e) {
+            std::cerr << "Database error fetching latest books: " << e.what() << std::endl;
+            send_json_error(conn, http::status::internal_server_error, "Database error", e.what());
+            return;
+        } catch (const std::exception& e) {
+            std::cerr << "Error during database query for latest books: " << e.what() << std::endl;
+            send_json_error(conn, http::status::internal_server_error, "Database query error", e.what());
+            return;
+        }
+
+        json json_response = json::array();
+        for (const auto& row: result) {
+            json book_obj;
+
+            book_obj["id"] = row["id"].as<int>();
+            book_obj["title"] = row["title"].as<std::string>();
+
+            if (!row["author"].is_null()) book_obj["author"] = row["author"].as<std::string>();
+            else book_obj["author"] = nullptr;
+
+            if (!row["isbn"].is_null()) book_obj["isbn"] = row["isbn"].as<std::string>();
+            else book_obj["isbn"] = nullptr;
+
+            if (!row["publisher"].is_null()) book_obj["publisher"] = row["publisher"].as<std::string>();
+            else book_obj["publisher"] = nullptr;
+
+            if (!row["publish_date"].is_null()) book_obj["publish_date"] = row["publish_date"].as<std::string>();
+            else book_obj["publish_date"] = nullptr;
+
+            if (!row["language"].is_null()) book_obj["language"] = row["language"].as<std::string>();
+            else book_obj["language"] = nullptr;
+
+            if (!row["page_count"].is_null()) book_obj["page_count"] = row["page_count"].as<int>();
+            else book_obj["page_count"] = nullptr;
+
+            if (!row["description"].is_null()) book_obj["description"] = row["description"].as<std::string>();
+            else book_obj["description"] = nullptr;
+
+            if (!row["created_at"].is_null()) book_obj["created_at"] = row["created_at"].as<std::string>();
+            else book_obj["created_at"] = nullptr;
+
+            json tags_array = json::array();
+            if (!row["tags"].is_null()) {
+                pqxx::array_parser parser = row["tags"].as_array();
+                std::pair<pqxx::array_parser::juncture, std::string> elem;
+                do {
+                    elem = parser.get_next();
+                    if (elem.first == pqxx::array_parser::juncture::string_value) 
+                        tags_array.push_back(elem.second);
+                } while (elem.first != pqxx::array_parser::juncture::done);
+            } 
+            book_obj["tags"] = tags_array;
+
+            if (!row["download_count"].is_null()) book_obj["download_count"] = row["download_count"].as<int>();
+            else book_obj["download_count"] = 0;
+
+            json_response.push_back(book_obj);
+        }
+
+        http::response<http::string_body> response{http::status::ok, request.version()};
+        response.set(http::field::server, "GeeCodeX Server");
+        response.set(http::field::content_type, "application/json");
+        response.keep_alive(false);
+        response.body() = json_response.dump(4);
+        response.prepare_payload();
+        
+        conn.send(std::move(response));
+        std::cout << "Latest books response sent successfully." << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "Error in handle_fetch_latest_books: " << e.what() << std::endl;
+        send_json_error(conn, http::status::internal_server_error, "Internal server error", e.what());
+    } catch (...) {
+        std::cerr << "Unknown exception in handle_fetch_latest_books" << std::endl;
+        send_json_error(conn, http::status::internal_server_error, "Unknown internal error");
+    }
+}
+
+
+
 }
 #endif // HTTP_IMPL_HPP

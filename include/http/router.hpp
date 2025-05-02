@@ -18,6 +18,7 @@
 #include <boost/asio.hpp>
 #include <boost/core/ignore_unused.hpp>
 
+
 namespace geecodex::http {
     namespace beast = boost::beast;
     namespace http  = beast::http;
@@ -49,6 +50,7 @@ namespace geecodex::http {
         DOWNLOAD_PDF,
         FETCH_ALL_PDF_INFO,
         FETCH_PDF_COVER,
+        FETCH_LATEST_BOOKS,
         UNKNOWN
     };
 
@@ -92,7 +94,9 @@ namespace geecodex::http {
     static constexpr route_info route_definitions[] = {
     {"/geecodex/hello",     http_method::GET,   api_route::HELLO},
     {"/geecodex/health",    http_method::GET,   api_route::HEALTH_CHECK},
-    {"/geecodex/books/cover", http_method::GET, api_route::FETCH_PDF_COVER, route_match_type::PREFIX},
+    // Precise match should be forward than less precise
+    {"/geecodex/books/latest", http_method::GET, api_route::FETCH_LATEST_BOOKS},
+    {"/geecodex/books/cover/", http_method::GET, api_route::FETCH_PDF_COVER, route_match_type::PREFIX},
     {"/geecodex/books/",    http_method::GET,   api_route::DOWNLOAD_PDF, route_match_type::PREFIX}
     };
     static constexpr auto route_table = static_route_table(route_definitions);
@@ -106,7 +110,7 @@ namespace geecodex::http {
     void handle_download_file(http_connection& conn);
     void handle_download_pdf(http_connection& conn);
     void handle_fetch_pdf_cover(http_connection& conn);
-
+    void handle_fetch_latest_books(http_connection& conn);
     void handle_not_found(http_connection& conn);
 
     using route_handler_func = std::function<void(http_connection&)>;
@@ -116,6 +120,7 @@ namespace geecodex::http {
             {api_route::HEALTH_CHECK, handle_health_check},
             {api_route::DOWNLOAD_PDF, handle_download_pdf},
             {api_route::FETCH_PDF_COVER, handle_fetch_pdf_cover},
+            {api_route::FETCH_LATEST_BOOKS, handle_fetch_latest_books},
             {api_route::UNKNOWN, handle_not_found},
         };
         return handlers;
