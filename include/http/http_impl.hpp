@@ -11,13 +11,18 @@
 #include <boost/beast/http/status.hpp>
 #include <boost/beast/http/string_body_fwd.hpp>
 #include <exception>
+#include <iterator>
 #include <json.hpp>
+#include <ostream>
 #include <pqxx/pqxx>
 #include <http/http_connection.h>
 #include <filesystem>
 #include <boost/beast/http/file_body.hpp>
 #include <regex>
 #include <utility>
+#include <boost/algorithm/string/case_conv.hpp>
+
+
 
 namespace geecodex::http {
 inline void handle_hello(http_connection& conn) { 
@@ -241,8 +246,161 @@ inline void handle_download_pdf(http_connection& conn) {
     }
 }
 
+inline void send_json_error( http_connection& conn
+                          , http::status status
+                          , const std::string& error_msg
+                          , const std::string& detail = ""
+                          ){
+    try {
+        json error_body;
+        error_body["error"] = error_msg;
+        if (!detail.empty()) error_body["message"] = detail;
 
+        http::response<http::string_body> response{status, conn.request().version()};
+        response.set(http::field::server, "GeeCodeX Server");
+        response.set(http::field::content_type, "application/json");
+        response.keep_alive(false);
+        response.body() = error_body.dump();
+        response.prepare_payload();
+        conn.send(std::move(response));
+    } catch (...) {
+        std::cerr << "Failed to send JSON error response" << std::endl;
+    }
+}
 
+inline std::string guess_mime_type(const std::string& extension) {
+    std::string ext_lower = boost::algorithm::to_lower_copy(extension);
+    if (ext_lower == ".png") return "image/png";
+    if (ext_lower == ".jpg" || ext_lower == ".jpeg") return "image/jpeg";
+    if (ext_lower == ".gif") return "image/gif";
+    if (ext_lower == ".webp") return "image/webp";
+    if (ext_lower == ".svg") return "image/svg+xml";
+    
+    return "application/octet-stream";
+}
 
+inline void handle_fetch_pdf_cover(http_connection& conn) {
+    try {
+        std::cout << "Handling PDF cover request (from file path)" << std::endl;
+        auto& request = conn.request();
+
+        std::string target = std::string(request.target());
+        std::cout << "Target path: " << target << std::endl;
+        
+        std::regex id_pattern("/geecodex/books/cover/(\\d+)");
+        std::smatch matches;
+
+        if (!std::regex_match(target, matches, id_pattern) || matches.size() < 2) {
+            std::cout << "Invalid cover path format: " << target << std::endl;
+            send_json_error(conn, http::status::bad_request, "Invalid book ID format");
+            return;
+        }
+
+        int book_id = 0;
+        try {
+            book_id = std::stoi(matches[1].str());
+        } catch (const std::exception& e) {
+            std::cerr << "Failed to parse book ID: " << matches[1].str() << " - " << e.what() << std::endl;
+            send_json_error(conn, http::status::bad_request, "Invalid book ID format", e.what());
+            return;
+        }
+    
+        std::cout << "Book ID: " << book_id << std::endl;
+
+        std::string cover_path_str;
+
+        bool is_active = false;
+
+        try {
+            pqxx::result result = execute_params(
+                "SELECT cover_path, is_active FROM codex_books WHERE id = $1",
+                book_id
+            );
+
+            if (result.empty()) {
+                std::cout << "Book not found for cover: ID " << book_id << std::endl;
+                send_json_error(conn, http::status::not_found, "Book not found");
+                return;
+            }
+
+            const auto& row = result[0];
+            if (row["cover_path"].is_null()) {
+                std::cout << "Cover path is NULL for book ID: " << book_id << std::endl;
+                send_json_error(conn, http::status::not_found, "Cover image not available for this book");
+                return;
+            }
+
+            cover_path_str = row["cover_path"].as<std::string>();
+            is_active = row["is_active"].as<bool>();
+            
+            std::cout << "Found book for cover. Path: " << cover_path_str 
+                      << ", Active: " << is_active << std::endl;
+
+            if (!is_active) {
+                send_json_error(conn, http::status::forbidden, "This book is currently unavailable");
+                return;
+            }
+
+            if (cover_path_str.empty()) {
+                std::cout << "Cover path is empty for book ID: " << book_id << std::endl;
+                send_json_error(conn, http::status::not_found, "Cover image path is invalid");
+                return;
+            }
+        } catch (const database::database_exception& e) {
+            std::cerr << "Database error fetching book cover path: " << e.what() << std::endl;
+            send_json_error(conn, http::status::internal_server_error, "Database error", e.what());
+            return;
+        } catch (const std::exception& e) {
+            std::cerr << "Error during database query for cover path: " << e.what() << std::endl;
+            send_json_error(conn, http::status::internal_server_error, "Database query error", e.what());
+            return;
+        }
+
+        fs::path cover_file_path(cover_path_str);
+
+        if (!fs::exists(cover_file_path) || !fs::is_regular_file(cover_file_path)) {
+            std::cerr << "Cover file not found or is not a regular file on server: " 
+                      << cover_path_str << std::endl;
+            send_json_error(conn, http::status::not_found, "Cover file not found on server");
+            return;
+        }
+
+        std::string mime_type = guess_mime_type(cover_file_path.extension().string());
+        std::cout << "Guessed MIME type: " << mime_type << " for " 
+                  << cover_file_path.filename().string() << std::endl;
+
+        beast::error_code ec;
+        http::file_body::value_type file_body;
+        file_body.open(cover_file_path.string().c_str(), beast::file_mode::read, ec);
+
+        if (ec) {
+            std::cerr << "Error opening cover file '" << cover_path_str << "': "<< ec.message() << std::endl;
+            send_json_error(conn, http::status::internal_server_error, "Failed to open cover file");
+            return;
+        }
+
+        const auto file_size = file_body.size();
+
+        http::response<http::file_body> response{
+            std::piecewise_construct, 
+            std::make_tuple(std::move(file_body)),
+            std::make_tuple(http::status::ok, request.version())};
+
+        response.set(http::field::server, "GeeCodeX Server");
+        response.set(http::field::content_type, mime_type);
+        response.content_length(file_size);
+        response.set(http::field::cache_control, "public, max-age=86400");
+        response.keep_alive(false);
+
+        conn.send(std::move(response));
+        std::cout << "Cover file sent successfully: " << cover_path_str << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "Error in handle_fetch_pdf_cover: " << e.what() << std::endl;
+        send_json_error(conn, http::status::internal_server_error, "Internal server error", e.what());
+    } catch (...) {
+        std::cerr << "Unknown exception in handle_fetch_pdf_cover" << std::endl;
+        send_json_error(conn, http::status::internal_server_error, "Unknown internal error");
+    }
+}
 }
 #endif // HTTP_IMPL_HPP

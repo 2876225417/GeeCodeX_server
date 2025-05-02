@@ -48,6 +48,7 @@ namespace geecodex::http {
         HEALTH_CHECK,
         DOWNLOAD_PDF,
         FETCH_ALL_PDF_INFO,
+        FETCH_PDF_COVER,
         UNKNOWN
     };
 
@@ -91,6 +92,7 @@ namespace geecodex::http {
     static constexpr route_info route_definitions[] = {
     {"/geecodex/hello",     http_method::GET,   api_route::HELLO},
     {"/geecodex/health",    http_method::GET,   api_route::HEALTH_CHECK},
+    {"/geecodex/books/cover", http_method::GET, api_route::FETCH_PDF_COVER, route_match_type::PREFIX},
     {"/geecodex/books/",    http_method::GET,   api_route::DOWNLOAD_PDF, route_match_type::PREFIX}
     };
     static constexpr auto route_table = static_route_table(route_definitions);
@@ -103,6 +105,8 @@ namespace geecodex::http {
     void handle_health_check(http_connection& conn);
     void handle_download_file(http_connection& conn);
     void handle_download_pdf(http_connection& conn);
+    void handle_fetch_pdf_cover(http_connection& conn);
+
     void handle_not_found(http_connection& conn);
 
     using route_handler_func = std::function<void(http_connection&)>;
@@ -111,6 +115,7 @@ namespace geecodex::http {
             {api_route::HELLO, handle_hello},
             {api_route::HEALTH_CHECK, handle_health_check},
             {api_route::DOWNLOAD_PDF, handle_download_pdf},
+            {api_route::FETCH_PDF_COVER, handle_fetch_pdf_cover},
             {api_route::UNKNOWN, handle_not_found},
         };
         return handlers;
