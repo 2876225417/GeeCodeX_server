@@ -516,7 +516,6 @@ struct semantic_version {
     int minor = 0;
     int patch = 0;
 
-
     static std::optional<semantic_version> from_string(const std::string& version_str) {
         semantic_version ver;
         std::vector<std::string> parts;
@@ -606,7 +605,7 @@ inline void handle_app_update_check(http_connection &conn) {
         try {
             std::cout << "Querying database for latest active version for platform: " << platform << std::endl;
             db_result = execute_params(
-                "SELECT version_name, version_code, release_notes, download_url, is_mandatory "
+                "SELECT version_name, version_code, release_notes, is_mandatory "
                 "FROM app_updates "
                 "WHERE platform = $1 AND is_active = TRUE "
                 "ORDER BY version_code DESC "
@@ -659,7 +658,6 @@ inline void handle_app_update_check(http_connection &conn) {
                 json_response["latest_version"] = latest_version_str;
                 json_response["version_code"] = latest_row["version_code"].as<int>();
                 json_response["release_notes"] = latest_row["release_notes"].is_null() ? "" : latest_row["release_notes"].as<std::string>();
-                json_response["download_url"] = latest_row["download_url"].is_null() ? "" : latest_row["download_url"].as<std::string>();
                 json_response["is_mandatory"] = latest_row["is_mandatory"].as<bool>();
             } else {
                 std::cout << "No update needed (client version is current or newer)." << std::endl;
@@ -815,8 +813,6 @@ inline void handle_download_latest_app(http_connection& conn) {
             conn.socket().shutdown(tcp::socket::shutdown_send, ignored_ec);
         }
     }
-
-
 }
 
 }
