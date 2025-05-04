@@ -3,6 +3,8 @@
 
 #include "database/db_conn.h"
 #include "database/db_ops.hpp"
+#include "http/router.hpp"
+#include <algorithm>
 #include <boost/beast/core/error.hpp>
 #include <boost/beast/core/file_base.hpp>
 #include <boost/beast/http/field.hpp>
@@ -13,14 +15,19 @@
 #include <exception>
 #include <iterator>
 #include <json.hpp>
+#include <optional>
 #include <ostream>
 #include <pqxx/pqxx>
 #include <http/http_connection.h>
 #include <filesystem>
 #include <boost/beast/http/file_body.hpp>
 #include <regex>
+#include <string>
 #include <utility>
 #include <boost/algorithm/string/case_conv.hpp>
+#include <charconv>
+#include <boost/algorithm/string/split.hpp>
+#include <boost/algorithm/string/classification.hpp>
 
 
 
@@ -275,7 +282,10 @@ inline std::string guess_mime_type(const std::string& extension) {
     if (ext_lower == ".gif") return "image/gif";
     if (ext_lower == ".webp") return "image/webp";
     if (ext_lower == ".svg") return "image/svg+xml";
-    
+   
+    if (ext_lower == ".apk") return "application/vnd.android.package-archive";
+    if (ext_lower == ".ipa") return "application/octet-stream";
+
     return "application/octet-stream";
 }
 
@@ -501,7 +511,313 @@ inline void handle_fetch_latest_books(http_connection& conn) {
     }
 }
 
+struct semantic_version {
+    int major = 0;
+    int minor = 0;
+    int patch = 0;
 
+
+    static std::optional<semantic_version> from_string(const std::string& version_str) {
+        semantic_version ver;
+        std::vector<std::string> parts;
+        boost::split(parts, version_str, boost::is_any_of("."));
+
+        if (parts.size() != 3) return std::nullopt;
+
+        auto parse_int = [&](const std::string& s, int& out) {
+            auto result = std::from_chars(s.data(), s.data() + s.size(), out);
+            return result.ec == std::errc() && result.ptr == s.data() + s.size();
+        };
+
+        if (!parse_int(parts[0], ver.major) || 
+            !parse_int(parts[1], ver.minor) ||
+            !parse_int(parts[2], ver.patch)) return std::nullopt;
+
+        return ver;
+    }
+
+    bool operator>(const semantic_version& other) const {
+        if (major != other.major) return major > other.major;
+        if (minor != other.minor) return minor > other.minor;
+        return patch > other.patch;
+    }
+
+    bool operator<=(const semantic_version& other) const {
+        return !(*this > other);
+    }
+
+    bool operator==(const semantic_version& other) const {
+        return major == other.major && 
+               minor == other.minor && 
+               patch == other.patch;
+    }
+};
+
+inline void handle_app_update_check(http_connection &conn) {
+    try {
+        std::cout << "Handling app update check request" << std::endl;
+        auto& request = conn.request();
+
+        if (request.find(http::field::content_type) == request.end() || 
+            request[http::field::content_type] != "application/json") {
+            send_json_error( conn, http::status::unsupported_media_type
+                           , "Invalid Content-Type", "Expected application/json");
+            return;
+        } 
+
+        json request_body;
+        try {
+            request_body = json::parse(request.body());
+        } catch (const json::parse_error& e) {
+            std::cerr << "JSON parse error: " << e.what() << std::endl;
+            send_json_error( conn, http::status::bad_request
+                           , "Invalid JSON format", e.what());
+            return;
+        }
+
+        if (!request_body.contains("current_version") || 
+            !request_body["current_version"].is_string() ||
+            !request_body.contains("platform") || 
+            !request_body["platform"].is_string()) {
+            send_json_error( conn, http::status::bad_request
+                           , "Missing or invalid fields"
+                           , "Requires 'current_version' (string) and 'platform' (string)");
+            return;
+        }
+
+        std::string current_version_str = request_body["current_version"];
+        std::string platform  = request_body["platform"];
+        boost::algorithm::to_lower(platform);
+
+        std::cout << "Client platform: " << platform 
+                  << ", Current Version: " << current_version_str
+                  << std::endl;
+
+        auto current_version_opt = semantic_version::from_string(current_version_str);
+        if (!current_version_opt) {
+            send_json_error( conn, http::status::bad_request
+                           , "Invalid version format"
+                           , "Version must be in x.y.z format (e.g. 1.0.2)");
+            return;
+        }
+        semantic_version current_version = *current_version_opt;
+
+        pqxx::result db_result;
+        try {
+            std::cout << "Querying database for latest active version for platform: " << platform << std::endl;
+            db_result = execute_params(
+                "SELECT version_name, version_code, release_notes, download_url, is_mandatory "
+                "FROM app_updates "
+                "WHERE platform = $1 AND is_active = TRUE "
+                "ORDER BY version_code DESC "
+                "LIMIT 1",
+                platform
+            );
+        } catch (const database::database_exception& e) {
+            std::cerr << "Database error fetching latest app version: " << e.what() << std::endl;
+            send_json_error(conn, http::status::internal_server_error, "Database error", e.what());
+            return;
+        } catch (const std::exception& e) {
+            std::cerr << "Error during database query for latest app version: " << e.what() << std::endl;
+            send_json_error(conn, http::status::internal_server_error, "Database query error", e.what());
+            return;
+        }
+
+        json json_response;
+        if (db_result.empty()) {
+            std::cout << "No active update found for platform: " << platform << std::endl;
+            json_response["update_available"] = false;
+        } else {
+            const auto& latest_row = db_result[0];
+            std::string latest_version_str = latest_row["version_name"].as<std::string>();
+            
+            auto latest_version_opt = semantic_version::from_string(latest_version_str);
+            if (!latest_version_opt) {
+                std::cerr << "CRITICAL: Invalid versions format ('" << latest_version_str 
+                          << "') found in database for platform '" << platform << "'!" << std::endl;
+                send_json_error( conn, http::status::internal_server_error
+                               , "Server configuration error", "Invalid version format in database.");
+                return;
+            }
+            semantic_version latest_version = *latest_version_opt;
+            
+            std::cout << "Latest DB version: " << latest_version_str 
+                      << " (" << latest_version.major 
+                      << "."  << latest_version.minor 
+                      << "."  << latest_version.patch << ")" 
+                      << std::endl;
+
+            std::cout << "Client Version: " << current_version_str 
+                      << " (" << current_version.major
+                      << "."  << current_version.minor
+                      << "."  << current_version.patch
+                      << std::endl;
+            
+            if (latest_version > current_version) {
+                std::cout << "Update available" << std::endl;
+                json_response["update_available"] = true;
+                json_response["latest_version"] = latest_version_str;
+                json_response["version_code"] = latest_row["version_code"].as<int>();
+                json_response["release_notes"] = latest_row["release_notes"].is_null() ? "" : latest_row["release_notes"].as<std::string>();
+                json_response["download_url"] = latest_row["download_url"].is_null() ? "" : latest_row["download_url"].as<std::string>();
+                json_response["is_mandatory"] = latest_row["is_mandatory"].as<bool>();
+            } else {
+                std::cout << "No update needed (client version is current or newer)." << std::endl;
+                json_response["update_available"] = false;
+            }
+
+            http::response<http::string_body> response{http::status::ok, request.version()};
+            response.set(http::field::server, "GeeCodeX Server");
+            response.set(http::field::content_type, "application/json");
+            response.keep_alive(false);
+            response.body() = json_response.dump();
+            response.prepare_payload();
+
+            conn.send(std::move(response));
+            std::cout << "App update check response send successfully." << std::endl;
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Error in handle_app_update_check: " << e.what() << std::endl;
+        try {
+            send_json_error(conn, http::status::internal_server_error, "internal_server_error", e.what());
+        } catch (...) {
+            std::cerr << "Failed to send error response in handle_app_update_check main catch block" << std::endl;
+            beast::error_code ignored_ec;
+            conn.socket().shutdown(tcp::socket::shutdown_send, ignored_ec);
+        }
+    } catch (...) {
+        std::cerr << "Unknown exception in handle_app_update_check" << std::endl;
+        try {
+            send_json_error(conn, http::status::internal_server_error, "Unknown internal error");
+        } catch (...) {
+            std::cerr << "Failed to send error response in handle_app_update_check unknown catch block" << std::endl;
+            beast::error_code ignored_ec;
+            conn.socket().shutdown(tcp::socket::shutdown_send, ignored_ec);
+        }
+    }
+}
+
+inline void handle_download_latest_app(http_connection& conn) {
+    try {
+        std::cout << "Handling latest app download request" << std::endl;
+        auto& request = conn.request();
+        std::string target = std::string(request.target());
+
+        std::regex platform_regex("/geecodex/app/download/latest/([a-zA-Z0-9_\\-]+)");
+        std::smatch match;
+        std::string platform;
+
+        if (std::regex_match(target, match, platform_regex) && match.size() == 2) {
+            platform = match[1].str();
+            boost::algorithm::to_lower(platform);
+            std::cout << "Requested platform: " << platform << std::endl;
+        } else {
+            std::cerr << "Invalid download path format: " << target << std::endl;
+            send_json_error(conn, http::status::bad_request, "Invalid URL format", "Expected /geecodex/app/download/latest/{platform}");
+            return;
+        }
+
+        pqxx::result db_result;
+        try {
+            std::cout << "Querying database for latest package path for platform: " << platform << std::endl;
+            db_result = execute_params(
+                "SELECT version_name, package_path "
+                "FROM app_updates "
+                "WHERE platform = $1 AND is_active = TRUE AND package_path IS NOT NULL AND package_path <> '' "
+                "ORDER BY version_code DESC "
+                "LIMIT 1",
+                platform
+            );
+            std::cout << "Database query returned " << db_result.size() << " rows for package path." << std::endl;
+        } catch (const database::database_exception& e) {
+            std::cerr << "Database error fetching package path: " << e.what() << std::endl;
+            send_json_error(conn, http::status::internal_server_error, "Database error", e.what());
+            return;
+        } catch (const std::exception& e) {
+            std::cerr << "Error during database query for package path: " << e.what() << std::endl;
+            send_json_error(conn, http::status::internal_server_error, "Database query error", e.what());
+            return;
+        }
+
+        if (db_result.empty()) {
+            std::cout << "No active package path found for platform: " << platform << std::endl;
+            send_json_error(conn, http::status::not_found, "Package not found", "No downloadable available for this platform");
+            return;
+        }
+
+        const auto& latest_row = db_result[0];
+        std::string package_path_str = latest_row["package_path"].as<std::string>();
+        std::string version_name = latest_row["version_name"].as<std::string>();
+
+        std::cout << "Found package_path: " << package_path_str << " for version " << version_name << std::endl;
+        fs::path package_file_path(package_path_str);
+        beast::error_code file_ec;
+
+        if (!fs::exists(package_file_path, file_ec) || !fs::is_regular_file(package_file_path, file_ec)) {
+            if (file_ec) std::cerr << "Filesystem error checking path '" << package_path_str << "': " << file_ec.message() << std::endl;
+            else std::cerr << "Package file not found or is not a regular file on server: " << package_path_str << std::endl;
+            send_json_error(conn, http::status::not_found, "Package file missing", "The application package file could not be found on server.");
+            return;
+        }
+
+        http::file_body::value_type file_body;
+        file_body.open(package_file_path.string().c_str(), beast::file_mode::read, file_ec);
+        
+        if (file_ec) {
+            std::cerr << "Error opening package file '" << package_path_str << ": " << file_ec.message() << std::endl;
+            send_json_error(conn, http::status::internal_server_error, "File access error", "Failed to open the package file");
+            return;
+        }
+
+        std::string file_extension = package_file_path.extension().string();
+        std::string mime_type = guess_mime_type(file_extension);
+
+        std::string download_filename = "GeeCodexApp-" + platform + "-" + version_name + file_extension;
+        download_filename = std::regex_replace(download_filename, std::regex("[^a-zA-Z0-9_.-]"), "_");
+        
+        std::cout << "Sending file: " << download_filename << " (MIME: " << mime_type << ")" << std::endl;
+
+        http::response<http::file_body> response {
+            std::piecewise_construct,
+            std::make_tuple(std::move(file_body)),
+            std::make_tuple(http::status::ok, request.version())
+        };
+
+        response.set(http::field::server, "GeeCodeX Server");
+        response.set(http::field::content_type, mime_type);
+        response.content_length(response.body().size());
+        response.set(http::field::content_disposition, "attachment; filename=\"" + download_filename + "\"");
+
+        response.set(http::field::cache_control, "no-cache, no-store, must-revalidate");
+        response.set(http::field::pragma, "no-cache");
+        response.set(http::field::expires, "0");
+
+        response.keep_alive(false);
+        
+        conn.send(std::move(response));
+        std::cout << "Package file sent successfully: " << package_path_str << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "Error in handle_download_latest_app: " << e.what() << std::endl;;
+        try {
+            send_json_error(conn, http::status::internal_server_error, "Internal server error", e.what());
+        } catch (...) {
+            std::cerr << "Failed to send error response in handle_download_latest_app main catch block" << std::endl;
+            beast::error_code ignored_ec;
+            conn.socket().shutdown(tcp::socket::shutdown_send, ignored_ec);
+        }
+    } catch (...) {
+        std::cerr << "Unknown exception  in handle_download_latest_app" << std::endl;
+        try {
+            send_json_error(conn, http::status::internal_server_error, "Unknown internal error");
+        } catch (...) {
+            std::cerr << "Failed to send error response in handle_download_latest_app unknown catch block." << std::endl;
+            beast::error_code ignored_ec;
+            conn.socket().shutdown(tcp::socket::shutdown_send, ignored_ec);
+        }
+    }
+
+
+}
 
 }
 #endif // HTTP_IMPL_HPP

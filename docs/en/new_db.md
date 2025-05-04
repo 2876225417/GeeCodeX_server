@@ -98,8 +98,57 @@ COMMENT ON COLUMN codex_books.updated_at IS 'Record updated date';
 COMMENT ON COLUMN codex_books.is_active IS 'Whether it is accessible';
 ```
 
-## 
+## 'app_updates' Table's Info
+```sql
+CREATE TABLE app_updates (
+    id SERIAL PRIMARY KEY,                      -- Unique ID for the update record
+    platform VARCHAR(50) NOT NULL DEFAULT 'android', -- Platform (e.g., 'android', 'ios') - Index recommended
+    package_name VARCHAR(255) NOT NULL,             -- Android application ID (e.g., 'com.yourcompany.geecodexapp') - Index recommended
+    version_code INTEGER NOT NULL,                  -- Integer version code (must increment for each release) - Index recommended
+    version_name VARCHAR(100) NOT NULL,             -- User-visible version name (e.g., '1.0.2', '2.0-beta')
+    channel VARCHAR(50) NOT NULL DEFAULT 'stable',  -- Release channel (e.g., 'stable', 'beta', 'alpha') - Index recommended
+    architecture VARCHAR(50) DEFAULT 'universal',    -- CPU architecture (e.g., 'universal', 'arm64-v8a', 'armeabi-v7a', 'x86_64') - Index recommended
+    release_notes TEXT,                             -- Description of changes in this version (changelog)
+    download_url VARCHAR(500) NOT NULL,             -- URL to download the APK file
+    file_size_bytes BIGINT,                         -- Size of the APK file in bytes (optional but helpful)
+    file_hash VARCHAR(128),                         -- SHA-256 hash of the APK file for integrity check (hex string, optional but highly recommended)
+    hash_algorithm VARCHAR(20) DEFAULT 'SHA-256',  -- Algorithm used for the hash (e.g., 'SHA-256', 'SHA-512')
+    min_os_version VARCHAR(50),                     -- Minimum required OS version (e.g., 'API 21', 'Android 5.0') (optional)
+    is_forced BOOLEAN DEFAULT FALSE,                -- Whether this update is mandatory
+    released_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- When this version was published - Index recommended
+    is_active BOOLEAN DEFAULT TRUE,                 -- Allows deactivating an update record without deleting
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Record creation time
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP  -- Record update time
+);
 
+-- Indexes for common query patterns
+CREATE INDEX idx_app_updates_lookup ON app_updates(platform, package_name, channel, architecture, is_active, version_code);
+CREATE INDEX idx_app_updates_released_at ON app_updates(released_at);
+
+-- Trigger for updated_at (reuse or create similar to codex_books)
+CREATE TRIGGER update_app_updates_modtime
+BEFORE UPDATE ON app_updates
+FOR EACH ROW
+EXECUTE FUNCTION update_modified_column(); -- Assuming update_modified_column function already exists
+
+-- Comments
+COMMENT ON TABLE app_updates IS 'Stores metadata for application updates';
+COMMENT ON COLUMN app_updates.platform IS 'Target platform (e.g., android, ios)';
+COMMENT ON COLUMN app_updates.package_name IS 'Unique identifier for the application (e.g., Android package name)';
+COMMENT ON COLUMN app_updates.version_code IS 'Integer version code, used for comparison (must increment)';
+COMMENT ON COLUMN app_updates.version_name IS 'User-friendly version string';
+COMMENT ON COLUMN app_updates.channel IS 'Release channel (stable, beta, etc.)';
+COMMENT ON COLUMN app_updates.architecture IS 'Target CPU architecture (universal, arm64-v8a, etc.)';
+COMMENT ON COLUMN app_updates.release_notes IS 'Changelog or description of changes';
+COMMENT ON COLUMN app_updates.download_url IS 'Direct URL to download the update package (e.g., APK)';
+COMMENT ON COLUMN app_updates.file_size_bytes IS 'Size of the update package in bytes';
+COMMENT ON COLUMN app_updates.file_hash IS 'Cryptographic hash (e.g., SHA-256 hex) of the package for integrity verification';
+COMMENT ON COLUMN app_updates.hash_algorithm IS 'Algorithm used for file_hash';
+COMMENT ON COLUMN app_updates.min_os_version IS 'Minimum OS version required for this update';
+COMMENT ON COLUMN app_updates.is_forced IS 'Flag indicating if the update is mandatory for the user';
+COMMENT ON COLUMN app_updates.released_at IS 'Timestamp when this version was made available';
+COMMENT ON COLUMN app_updates.is_active IS 'Flag to enable/disable this update record';
+```
 ##
 
 ##

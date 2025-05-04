@@ -51,6 +51,8 @@ namespace geecodex::http {
         FETCH_ALL_PDF_INFO,
         FETCH_PDF_COVER,
         FETCH_LATEST_BOOKS,
+        APP_UPDATE_CHECK,
+        APP_DOWNLOAD_LATEST,
         UNKNOWN
     };
 
@@ -92,12 +94,14 @@ namespace geecodex::http {
     };
 
     static constexpr route_info route_definitions[] = {
-    {"/geecodex/hello",     http_method::GET,   api_route::HELLO},
-    {"/geecodex/health",    http_method::GET,   api_route::HEALTH_CHECK},
-    // Precise match should be forward than less precise
-    {"/geecodex/books/latest", http_method::GET, api_route::FETCH_LATEST_BOOKS},
-    {"/geecodex/books/cover/", http_method::GET, api_route::FETCH_PDF_COVER, route_match_type::PREFIX},
-    {"/geecodex/books/",    http_method::GET,   api_route::DOWNLOAD_PDF, route_match_type::PREFIX}
+        {"/geecodex/hello",                 http_method::GET,   api_route::HELLO},
+        {"/geecodex/health",                http_method::GET,   api_route::HEALTH_CHECK},
+        // Precise match should be forward than less precise
+        {"/geecodex/books/latest",          http_method::GET,   api_route::FETCH_LATEST_BOOKS},
+        {"/geecodex/books/cover/",          http_method::GET,   api_route::FETCH_PDF_COVER,     route_match_type::PREFIX},
+        {"/geecodex/books/",                http_method::GET,   api_route::DOWNLOAD_PDF,        route_match_type::PREFIX},
+        {"/geecodex/app/update_check",      http_method::POST,  api_route::APP_UPDATE_CHECK},
+        {"/geecodex/app/download/latest/",  http_method::GET,   api_route::APP_DOWNLOAD_LATEST, route_match_type::PREFIX},        
     };
     static constexpr auto route_table = static_route_table(route_definitions);
     /* ----Route Table Parser---- */
@@ -111,6 +115,8 @@ namespace geecodex::http {
     void handle_download_pdf(http_connection& conn);
     void handle_fetch_pdf_cover(http_connection& conn);
     void handle_fetch_latest_books(http_connection& conn);
+    void handle_app_update_check(http_connection& conn);
+    void handle_download_latest_app(http_connection& conn);
     void handle_not_found(http_connection& conn);
 
     using route_handler_func = std::function<void(http_connection&)>;
@@ -121,6 +127,9 @@ namespace geecodex::http {
             {api_route::DOWNLOAD_PDF, handle_download_pdf},
             {api_route::FETCH_PDF_COVER, handle_fetch_pdf_cover},
             {api_route::FETCH_LATEST_BOOKS, handle_fetch_latest_books},
+            {api_route::APP_UPDATE_CHECK, handle_app_update_check},
+            {api_route::APP_DOWNLOAD_LATEST, handle_download_latest_app},
+        
             {api_route::UNKNOWN, handle_not_found},
         };
         return handlers;
