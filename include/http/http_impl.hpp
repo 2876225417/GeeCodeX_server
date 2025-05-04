@@ -12,6 +12,7 @@
 #include <boost/beast/http/message_fwd.hpp>
 #include <boost/beast/http/status.hpp>
 #include <boost/beast/http/string_body_fwd.hpp>
+#include <boost/utility/string_view_fwd.hpp>
 #include <exception>
 #include <iterator>
 #include <json.hpp>
@@ -28,7 +29,7 @@
 #include <charconv>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
-
+#include <boost/algorithm/string/predicate.hpp>
 
 
 namespace geecodex::http {
@@ -300,6 +301,7 @@ inline void handle_fetch_pdf_cover(http_connection& conn) {
         std::regex id_pattern("/geecodex/books/cover/(\\d+)");
         std::smatch matches;
 
+
         if (!std::regex_match(target, matches, id_pattern) || matches.size() < 2) {
             std::cout << "Invalid cover path format: " << target << std::endl;
             send_json_error(conn, http::status::bad_request, "Invalid book ID format");
@@ -557,12 +559,22 @@ inline void handle_app_update_check(http_connection &conn) {
         std::cout << "Handling app update check request" << std::endl;
         auto& request = conn.request();
 
-        if (request.find(http::field::content_type) == request.end() || 
-            request[http::field::content_type] != "application/json") {
+
+        auto it = request.find(http::field::content_type);
+        if (it == request.end()) {
             send_json_error( conn, http::status::unsupported_media_type
                            , "Invalid Content-Type", "Expected application/json");
             return;
-        } 
+        }
+
+
+        boost::string_view content_type_value = it->value();
+        if (!boost::algorithm::istarts_with(content_type_value, "application/json")) {
+            std::cerr << "Invalid Content-Type received: " << content_type_value << std::endl;
+            send_json_error( conn, http::status::unsupported_media_type
+                           , "Invalid Content-Type", "Expected application/json media type");
+            return;
+        }
 
         json request_body;
         try {
