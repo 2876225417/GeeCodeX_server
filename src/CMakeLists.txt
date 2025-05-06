@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 
 
 find_package(Boost REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 add_subdirectory(http)
 add_subdirectory(database)
@@ -17,5 +18,7 @@ target_link_libraries(inf_qwq_backend
     PRIVATE 
     db
     Boost::boost
+    OpenSSL::SSL
+    OpenSSL::Crypto
 )
 

@@ -53,6 +53,9 @@ namespace geecodex::http {
         FETCH_LATEST_BOOKS,
         APP_UPDATE_CHECK,
         APP_DOWNLOAD_LATEST,
+        CLIENT_FEEDBACK,
+        AI_CHAT,
+        MATH_RECOGNIZE,
         UNKNOWN
     };
 
@@ -94,6 +97,7 @@ namespace geecodex::http {
     };
 
     static constexpr route_info route_definitions[] = {
+        {"/geecodex/ai/chat",               http_method::POST,  api_route::AI_CHAT},
         {"/geecodex/hello",                 http_method::GET,   api_route::HELLO},
         {"/geecodex/health",                http_method::GET,   api_route::HEALTH_CHECK},
         // Precise match should be forward than less precise
@@ -102,6 +106,9 @@ namespace geecodex::http {
         {"/geecodex/books/",                http_method::GET,   api_route::DOWNLOAD_PDF,        route_match_type::PREFIX},
         {"/geecodex/app/update_check",      http_method::POST,  api_route::APP_UPDATE_CHECK},
         {"/geecodex/app/download/latest/",  http_method::GET,   api_route::APP_DOWNLOAD_LATEST, route_match_type::PREFIX},        
+        {"/geecodex/feedback",              http_method::POST,  api_route::CLIENT_FEEDBACK },
+        
+        {"/geecodex/math/recognize",        http_method::POST,  api_route::MATH_RECOGNIZE},
     };
     static constexpr auto route_table = static_route_table(route_definitions);
     /* ----Route Table Parser---- */
@@ -117,6 +124,9 @@ namespace geecodex::http {
     void handle_fetch_latest_books(http_connection& conn);
     void handle_app_update_check(http_connection& conn);
     void handle_download_latest_app(http_connection& conn);
+    void handle_fetch_client_feedback(http_connection& conn);
+    void handle_ai_chat(http_connection& conn);
+    void handle_math_recognize(http_connection& conn);
     void handle_not_found(http_connection& conn);
 
     using route_handler_func = std::function<void(http_connection&)>;
@@ -129,8 +139,10 @@ namespace geecodex::http {
             {api_route::FETCH_LATEST_BOOKS, handle_fetch_latest_books},
             {api_route::APP_UPDATE_CHECK, handle_app_update_check},
             {api_route::APP_DOWNLOAD_LATEST, handle_download_latest_app},
-        
-            {api_route::UNKNOWN, handle_not_found},
+            {api_route::CLIENT_FEEDBACK, handle_fetch_client_feedback},
+            {api_route::AI_CHAT, handle_ai_chat},
+            {api_route::MATH_RECOGNIZE, handle_math_recognize},
+           {api_route::UNKNOWN, handle_not_found},
         };
         return handlers;
     }

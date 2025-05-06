@@ -5,6 +5,8 @@
 #include "database/db_ops.hpp"
 #include "http/router.hpp"
 #include <algorithm>
+#include <boost/asio/ssl/context.hpp>
+#include <boost/asio/ssl/verify_mode.hpp>
 #include <boost/beast/core/error.hpp>
 #include <boost/beast/core/file_base.hpp>
 #include <boost/beast/http/field.hpp>
@@ -13,9 +15,16 @@
 #include <boost/beast/http/status.hpp>
 #include <boost/beast/http/string_body_fwd.hpp>
 #include <boost/utility/string_view_fwd.hpp>
+#include <boost/algorithm/string/trim.hpp>
+#include <boost/asio/ssl/error.hpp>
+#include <boost/asio/ssl/context.hpp>
+#include <boost/asio/ssl/stream.hpp>
+#include <cstdlib>
 #include <exception>
 #include <iterator>
 #include <json.hpp>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <ostream>
 #include <pqxx/pqxx>
@@ -23,6 +32,7 @@
 #include <filesystem>
 #include <boost/beast/http/file_body.hpp>
 #include <regex>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <boost/algorithm/string/case_conv.hpp>
@@ -33,6 +43,10 @@
 
 
 namespace geecodex::http {
+namespace net = boost::asio;
+namespace ssl = net::ssl;
+using tcp = net::ip::tcp;
+
 inline void handle_hello(http_connection& conn) { 
     auto& m_response = conn.response();
     m_response.set(http::field::content_type, "text/plain");
@@ -257,7 +271,7 @@ inline void handle_download_pdf(http_connection& conn) {
 inline void send_json_error( http_connection& conn
                           , http::status status
                           , const std::string& error_msg
-                          , const std::string& detail = ""
+                          , const std::string& detail
                           ){
     try {
         json error_body;
@@ -827,5 +841,244 @@ inline void handle_download_latest_app(http_connection& conn) {
     }
 }
 
+inline bool check_content_type_is_json(http_connection& conn) {
+    auto const& request = conn.request();
+    
+    auto it = request.find(http::field::content_type);
+    if (it == request.end()) {
+        std::cerr << "Request missing Content-Type header." << std::endl;
+        send_json_error( conn, http::status::unsupported_media_type
+                       , "Missing Content-Type"
+                       , "Header 'Content-Type: application/json' is required.");
+        return false;
+    }
+
+    boost::string_view content_type_value = it->value();
+    
+    if (!boost::algorithm::istarts_with(content_type_value, "application/json")) {
+        std::cerr << "Invalid Content-Type received: " << content_type_value << std::endl;
+        send_json_error( conn, http::status::unsupported_media_type
+                       , "Invalid Content-Type"
+                       , "Expected 'application/json' media type.");
+        return false;
+    }
+    return true;
+}
+
+
+inline void handle_fetch_client_feedback(http_connection &conn) {
+    try {
+        std::cout << "Handling client feedback submission request" << std::endl;
+        auto& request = conn.request();
+
+        if (!check_content_type_is_json(conn)) return;
+
+        json request_body;
+        try {
+            request_body = json::parse(request.body());
+        } catch (const json::parse_error& e) {
+            std::cerr << "JSON parse error: " << e.what() << std::endl;
+            send_json_error( conn, http::status::bad_request
+                           , "Invalid JSON format",  e.what());
+            return;
+        }
+
+        if (!request_body.contains("feedback") ||
+            !request_body["feedback"].is_string() || 
+            request_body["feedback"].get<std::string>().empty()) {
+            send_json_error( conn, http::status::bad_request
+                           , "Missing or invalid field", "Requires non-empty 'feedback' (string) field.");        
+            return;
+        }
+
+        std::string feedback_text = request_body["feedback"];
+        std::string nickname = "Anonymous";
+
+        if (request.body().contains("nickname") && request_body["nickname"].is_string()) {
+            std::string temp_nickname = request_body["nickname"];
+            boost::algorithm::trim(temp_nickname);
+            if (!temp_nickname.empty()) {
+                nickname = temp_nickname;
+                if (nickname.length() > 100) {
+                    nickname = nickname.substr(0, 100);
+                    std::cout << "Warning: Truncated nickname to 100 characters." << std::endl;
+                }
+            }
+        }
+
+        std::cout << "Received feedback from: " << nickname
+                  << "', Feedback: '" << feedback_text.substr(0, 50) << "..."
+                  << std::endl;
+
+        try {
+            const std::string sql = 
+                "INSERT INTO client_feedback (nickname, feedback_text) VALUES ($1, $2)";
+            
+            execute_transaction([&](pqxx::work& txn) {
+                txn.exec_params(sql, nickname, feedback_text);
+            });
+
+            std::cout << "Feedback from " << nickname 
+                      << "' stored successfully in the database." << std::endl;
+        } catch (const database_exception& e) {
+            std::cerr << "Database error storing feedback: " << e.what() << std::endl;
+            send_json_error( conn, http::status::internal_server_error
+                           , "Database error", "Failed to store feedback.");
+            return;
+        } catch (const std::exception& e) {
+            std::cerr << "Error during database insert for feedback: " << e.what() << std::endl;
+            send_json_error( conn, http::status::internal_server_error
+                           , "Database insert error", "An unexpected error occurred when storing feedback.");
+            return;
+        }
+
+        json json_response;
+        json_response["status"] = "success";
+        json_response["message"] = "Feedback received successfully. Thank you!";
+
+        http::response<http::string_body> response{http::status::ok, request.version()};
+        response.set(http::field::server, "GeeCodeX Server");
+        response.set(http::field::content_type, "application/json");
+        response.keep_alive(false);
+        response.body() = json_response.dump();
+        response.prepare_payload();
+
+        conn.send(std::move(response));
+        std::cout << "Client feedback success response sent." << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "Error in handle_fetch_client_feedback: " << e.what() << std::endl;
+        try {
+            if (!conn.socket().is_open()) return;
+            if (!conn.response_sent()) send_json_error(conn, http::status::internal_server_error, "Internal server error", e.what());
+        } catch (...) {
+            std::cerr << "Failed to send error  response in handle_fetch_cilent_feedback main catch block." << std::endl;
+            beast::error_code ignored_ec;
+            conn.socket().shutdown(tcp::socket::shutdown_both, ignored_ec);
+            conn.socket().close(ignored_ec);
+        }
+    } catch (...) {
+        std::cerr << "Unknown exception in handle_fetch_client_feedback" << std::endl;
+        try {
+            if (!conn.socket().is_open()) return;
+            if (!conn.response_sent()) send_json_error(conn, http::status::internal_server_error, "Unknown internal error");
+        } catch (...) {
+            std::cerr << "Failed to send error response in handle_fetch_client_feedback unknown catch block." << std::endl;
+            beast::error_code ignored_ec;
+            conn.socket().shutdown(tcp::socket::shutdown_both, ignored_ec);
+            conn.socket().close(ignored_ec);
+        }
+    }
+}
+
+inline ssl::context& get_shared_ssl_context() {
+    static ssl::context ssl_ctx{ssl::context::tlsv13_client};
+    static std::once_flag init_flag;
+
+    std::call_once(init_flag, []() {
+        try {
+            std::cout << "Initializing shared SSL context..." << std::endl;
+            ssl_ctx.set_default_verify_paths();
+
+            ssl_ctx.set_verify_mode(ssl::verify_peer);
+            std::cout << "Shared SSL context initialized successfully." << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "CRITICAL ERROR: Failed to initialize shared SSL context: " << e.what() << std::endl;
+            throw;
+        }
+    });
+    return ssl_ctx;
+}
+
+inline std::string get_deepseek_api_key() {
+    const char* key = std::getenv("DEEPSEEK_API_KEY");
+    std::cout << "DEEPSEEK_API_KEY: " << key << std::endl;
+    if (key == nullptr || std::string(key).empty()) {
+        std::cerr << "CRITICAL ERROR: DEEPSEEK_API_KEY environment variable not set or empty." << std::endl;
+        throw std::runtime_error("DEEPSEEK_API_KEY environment variable not set or empty");
+    }
+    return std::string(key);
+}
+
+
+inline void handle_ai_chat(http_connection &conn) {
+    bool response_sent_flag = false;
+    
+    try {
+        std::cout << "Handling AI chat request" << std::endl;
+
+        if (!check_content_type_is_json(conn)) {
+            response_sent_flag = true;
+            return;
+        }
+
+        json request_body;
+        try {
+            request_body = json::parse(conn.request().body());
+        } catch (const json::parse_error& e) {
+            std::cerr << "AI Chat JSON parse error: " << e.what() << std::endl;
+            send_json_error(conn, http::status::bad_request, "Invalid JSON format", e.what());
+            response_sent_flag = true;
+            return;
+        }
+
+        if (!request_body.contains("messages") ||
+            !request_body["messages"].is_array() || 
+            request_body["messages"].empty()) {
+                send_json_error(conn, http::status::bad_request, "Invalid request format", "Missing or invalid 'messages' array");
+                response_sent_flag = true;
+                return;
+            }
+        
+        for (const auto& msg: request_body["messages"]) {
+            if (!msg.is_object() ||
+                !msg.contains("role") || 
+                !msg["role"].is_string() ||
+                !msg.contains("content") || 
+                !msg["content"].is_string()) {
+                    send_json_error(conn, http::status::bad_request, "Invalid request format", "Invalid structure within 'messages' array.");
+                    response_sent_flag = true;
+                    return;
+                }
+        }
+
+        json deepseek_request_body;
+        deepseek_request_body["model"] = request_body.value("model", "deepseek-chat");
+        deepseek_request_body["messages"] = request_body["messages"];
+        deepseek_request_body["stream"] = false;
+
+        std::string api_key = get_deepseek_api_key();
+        
+        ssl::context& shared_ssl_ctx = get_shared_ssl_context();
+
+        std::cout << "Launching deepseek_session..." << std::endl;
+        std::make_shared<deepseek_session>(
+            conn.socket().get_executor(),
+            shared_ssl_ctx,
+            conn.shared_from_this()
+        )->run("/chat/completions", deepseek_request_body.dump(), api_key);
+        std::cout << "Exiting handle_ai_chat handler function (async request launched)." << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "Error in handle_ai_chat setup: " << e.what() << std::endl;
+        if (!response_sent_flag) {
+            try {
+                send_json_error(conn, http::status::internal_server_error, "Internal Server Error", e.what());
+            } catch (...) { }
+        }
+    } catch (...) {
+        std::cerr << "Unknown exception during handle_ai_chat setup" << std::endl;
+        if (!response_sent_flag) {
+            try {
+                send_json_error(conn, http::status::internal_server_error, "Unknown Internal Error");
+            } catch (...) { }
+        }
+    }
+}
+
+inline void handle_math_recognize(http_connection &conn) {
+
+}
+
+
 }
 #endif // HTTP_IMPL_HPP
+

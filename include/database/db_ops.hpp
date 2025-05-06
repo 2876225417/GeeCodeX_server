@@ -73,11 +73,17 @@ execute_transaction(const std::function<void(pqxx::work&)>& transaction_func) {
         if (!conn.is_initialized()) 
             throw database_exception(std::string("Database connection not initialized"));
         pqxx::work txn(conn.get_connection());
-        transaction_func(txn);
-        txn.commit();
+        try {
+            transaction_func(txn);
+            txn.commit();
+        } catch (...) {
+            throw;
+        }
     } catch (const pqxx::sql_error& e) {
         throw database_exception("Transaction SQL error: " + std::string(e.what()) 
                                 +  ", Query: " + e.query());
+    } catch (const database_exception& e) {
+        throw;
     } catch (const std::exception& e) {
         throw database_exception("Transaction error: " + std::string(e.what()));
     }
@@ -89,6 +95,8 @@ batch_insert( const std::string& table
             , const std::vector<std::string>& columns
             , const Container& data
             ){
+    if (data.empty()) return 0;
+
     try {
         auto& conn = pg_connection::get_instance();
         if (!conn.is_initialized())
@@ -108,7 +116,7 @@ batch_insert( const std::string& table
         }
 
         std::string insert_sql = "INSERT INTO " + txn.quote_name(table) 
-                                   + " (" + column_list + ") VALUES (" + placeholders +")";
+                               + " (" + column_list + ") VALUES (" + placeholders +")";
             
         int affected_rows = 0;
         for (const auto& row: data) {
@@ -159,6 +167,21 @@ inline T get_scalar(const std::string& sql) {
         throw database_exception("Error getting scalar value: " + std::string(e.what()));
     }
 }
+
+template <typename T, typename... Args>
+inline T get_scalar_params(const std::string& sql, Args&&... args) {
+    try {
+
+
+    } catch (const pqxx::sql_error& e) {
+        throw database_exception( "SQL error getting scalar with params: " + std::string(e.what()) 
+                                + (e.query().empty() ? "" : ", Query: " + e.query()));
+    } catch (const std::exception& e) {
+        throw database_exception("Error getting scalar value with params: " + std::string(e.what()));
+    }
+}
+
+
 
 } // NAMESPACE GEECODEX
 
