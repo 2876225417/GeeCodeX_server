@@ -1,0 +1,5 @@
+{
+    "input_path": "general_formula_rec_002.png",
+    "page_index": null,
+    "rec_formula": "m_{0}\\frac{d}{d v}\\left[v\\bigg(1-\\frac{v^{2}}{c^{2}}\\bigg)^{-\\frac{1}{2}}\\right]"
+}
