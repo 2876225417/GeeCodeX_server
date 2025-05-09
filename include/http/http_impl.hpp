@@ -1074,7 +1074,16 @@ inline void handle_ai_chat(http_connection &conn) {
     }
 }
 
-inline void handle_math_recognize(http_connection &conn) {
+inline void handle_score_book(http_connection &conn) {
+
+}
+
+inline void handle_comment_book(http_connection &conn) {
+
+}
+
+
+inline void handle_content_recognize(http_connection &conn) {
 
 }
 

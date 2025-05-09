@@ -2,6 +2,7 @@
 #define HTTP_CONNECTION_H
 
 
+
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/error.hpp>
 #include <boost/beast/core/bind_handler.hpp>
@@ -25,6 +26,7 @@
 #include <boost/asio/ssl/error.hpp>
 #include <boost/asio/ssl/context.hpp>
 #include <boost/asio/ssl/stream.hpp>
+#include <cstddef>
 #include <database/db_conn.h>
 #include <database/db_ops.hpp>
 #include <exception>
@@ -86,100 +88,11 @@ public:
     bool response_sent() const { return m_response_sent; }
 
     void send(http::response<http::string_body>&& response) {
-        try {
-            auto shared_response = std::make_shared<http::response<http::string_body>>(std::move(response));
-            auto self = shared_from_this();
-            m_response_sent = true;
-            shared_response->prepare_payload();
-            
-            http::async_write(m_socket, *shared_response, [self, shared_response](beast::error_code ec, std::size_t bytes) { 
-                try {
-                    if (ec) std::cerr << "Error writing response: " << ec.message() << '\n';
-                    else std::cout << "Response sent successfully (" << bytes << " bytes)" << std::endl;
-
-                    beast::error_code shutdown_ec;
-                    self->m_socket.shutdown(tcp::socket::shutdown_send, shutdown_ec);
-                    if (shutdown_ec && shutdown_ec != beast::errc::not_connected) {
-                        std::cerr << "Error shutting down socket: " << shutdown_ec.message() << '\n'; 
-                    } else std::cout << "Socket shutdown successfully" << std::endl;
-                } catch (const std::exception& e) {
-                    std::cerr << "Exception in send completion handler: " << e.what() << '\n';
-                } catch (...) {
-                    std::cerr << "Unknown exception in send completion hanlder" << '\n';
-                }
-            });
-        } catch (const std::exception& e) {
-            std::cerr << "Exception in send(string_body): " << e.what() << '\n';
-            try {
-                if (!m_response_sent) {
-                    http::response<http::string_body> 
-                        error_response{http::status::internal_server_error, m_request.version()};
-                    error_response.set(http::field::content_type, "application/json");
-                    error_response.body() = R"({"error": "Failed to send response"})";
-                    error_response.prepare_payload();
-
-                    m_socket.write_some(net::buffer(error_response.body()));
-                    m_socket.shutdown(tcp::socket::shutdown_send);
-                }
-            } catch (...) {
-                std::cerr << "failed to send error response" << '\n';
-            }     
-        } catch(...) {
-            std::cerr << "Unknown exception in send(string_body)" << '\n';
-        }
+        send_response_impl(std::move(response), "string_body");
     }  
 
     void send(http::response<http::file_body>&& response) {
-        try {
-            auto shared_response = std::make_shared<http::response<http::file_body>>(std::move(response));
-            auto self = shared_from_this();
-            m_response_sent = true;
-        
-            std::cout << "Starting file transfer Size: " 
-                      << (shared_response->body().size() / (1024.f * 1024.f))
-                      << " MB" << std::endl; 
-
-            http::async_write( m_socket, *shared_response
-                             , [self, shared_response](beast::error_code ec, std::size_t bytes) {
-                                    try {
-                                        if (ec) std::cerr << "Error writing file response: " << ec.message() << '\n';
-                                        else std::cout << "File response sent successfully ("
-                                                       << (bytes / (1024.f * 1024.f))
-                                                       << " MB)" << std::endl;
-
-                                        if (!ec) {
-                                            beast::error_code shutdown_ec;
-                                            self->m_socket.shutdown(tcp::socket::shutdown_send, shutdown_ec);
-                                            if (shutdown_ec && shutdown_ec != beast::errc::not_connected)
-                                                std::cerr << "Error shutting down socket: " << shutdown_ec.message() << '\n';
-                                            else std::cout << "Socket shutdown successfully" << std::endl;
-                                        }
-                                    } catch (const std::exception& e) {
-                                        std::cerr << "Exception in file send completion handler: " << e.what() << '\n';
-                                    } catch (...) { 
-                                        std::cerr << "Unknown exception in file send completion handler" << '\n';
-                                    }
-                             });
-
-        } catch (const std::exception& e) {
-            std::cerr << "Exception in send(file_body): " << e.what() << std::endl;
-            try {
-                if (!m_response_sent) {
-                    http::response<http::string_body> 
-                        error_response{http::status::internal_server_error, m_request.version()};
-                    error_response.set(http::field::content_type, "application/json");
-                    error_response.body() = R"({"error": "Failed to send file response"})";
-                    error_response.prepare_payload();
-
-                    m_socket.write_some(net::buffer(error_response.body()));
-                    m_socket.shutdown(tcp::socket::shutdown_send);
-                }
-            } catch (...) {
-                std::cerr << "Failed to send error response" << '\n';
-            }
-        } catch (...) {
-            std::cerr << "Unknown exception in send(file_body)" << '\n';
-        }
+        send_response_impl(std::move(response), "file_body");
     }
 
 private: 
@@ -189,6 +102,50 @@ private:
     http::response<http::string_body>   m_response;
     bool                                m_response_sent;
 
+
+    template <class BodyType>
+    void send_response_impl(http::response<BodyType>&& response_to_send, const char* response_description) {
+        if (m_response_sent) {
+            std::cerr << "Error: Attempted to send response when one was already sent (" 
+                      << response_description << ")" << std::endl;
+            return;
+        }
+
+        try {
+            auto shared_response = std::make_shared<http::response<BodyType>>(std::move(response_to_send));
+            auto self = shared_from_this();
+            m_response_sent = true;
+
+            shared_response->prepare_payload();
+            
+            std::cout << "Starting " << response_description << " transfer. Size: "
+                      << shared_response->payload_size().value_or(0) / (1024.f * 1024.f)
+                      << " MB" << std::endl;
+        
+            http::async_write(m_socket, *shared_response, [self, shared_response, response_description_str = std::string(response_description)](beast::error_code ec, std::size_t bytes_transferred) {
+                try {
+                    if (ec) std::cerr << "Error writing " << response_description_str << " response: " << ec.message() << '\n';
+                    else std::cout << response_description_str << " response sent successfully ("
+                                   << bytes_transferred / (1024.f * 1024.f)
+                                   << " MB)" << std::endl;
+
+                    beast::error_code shutdown_ec;
+                    self->m_socket.shutdown(tcp::socket::shutdown_send, shutdown_ec);
+                    if (shutdown_ec && shutdown_ec != beast::errc::not_connected) 
+                        std::cerr << "Error shutting down socket send: " << shutdown_ec.message() << '\n';
+                    else if (!shutdown_ec) { /* Optional: Successfully Response */}
+                } catch (const std::exception& e) {
+                    std::cerr << "Exception in " << response_description_str << " send completion handler: " << e.what() << '\n';
+                } catch (...) {
+                    std::cerr << "Unknown exception in " << response_description_str << " send completion handler" << '\n';
+                }
+            });
+        } catch (const std::exception& e) {
+            std::cerr << "Exception setting up send(" << response_description << "):" << e.what() << '\n';
+        } catch (...) {
+            std::cerr << "Unknown exception setting up send(" << response_description << ")" << '\n';
+        }
+    }
     
     void read_request() {
         auto self = shared_from_this();
@@ -220,9 +177,10 @@ private:
                       << " " << target << std::endl;
 
             http_method method = enum2method(m_request.method());
-            api_route route = route_table.find(target, method);
+            api_route route = get_global_route_table().find(target, method);
         
-            std::cout << "Route matched: " << static_cast<int>(route) << std::endl;
+            std::cout << "Route matched: " << geecodex::http::to_string(route) 
+                      << " (Enum value: " << static_cast<int>(route) << ") " << std::endl;
 
             m_response.set(http::field::server, "GeeCodeX");
             dispatch_route(route);

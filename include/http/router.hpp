@@ -18,6 +18,10 @@
 #include <boost/asio.hpp>
 #include <boost/core/ignore_unused.hpp>
 
+#include <initializer_list>
+#include <magic_enum.hpp>
+#include <map>
+#include <memory>
 
 namespace geecodex::http {
     namespace beast = boost::beast;
@@ -34,7 +38,7 @@ namespace geecodex::http {
         UNKNOWN
     };
 
-    inline http_method enum2method(http::verb method) {
+    [[nodiscard]] constexpr http_method enum2method(http::verb method) {
         switch (method) {
             case http::verb::get:       return http_method::GET;
             case http::verb::post:      return http_method::POST;
@@ -43,21 +47,48 @@ namespace geecodex::http {
             default:                    return http_method::UNKNOWN;
         }
     }
-    
+
+    [[nodiscard]] constexpr std::string_view to_string(http_method m) {
+        switch(m) {
+            case http_method::GET:      return "GET";
+            case http_method::POST:     return "POST";
+            case http_method::PUT:      return "PUT";
+            case http_method::DELETE:   return "DELETE";
+            case http_method::UNKNOWN:  return "UNKNOWN METHOD";
+        }
+        return "Error: Invalid http_method";
+    }
+
     enum class api_route {
         HELLO,
         HEALTH_CHECK,
+        
         DOWNLOAD_PDF,
+        
         FETCH_ALL_PDF_INFO,
         FETCH_PDF_COVER,
         FETCH_LATEST_BOOKS,
+
         APP_UPDATE_CHECK,
         APP_DOWNLOAD_LATEST,
+        
         CLIENT_FEEDBACK,
         AI_CHAT,
-        MATH_RECOGNIZE,
+        
+        COMMENT_BOOK,
+        SCORE_BOOK,
+        
+        CONTENT_RECOGNIZE,
         UNKNOWN
     };
+
+    [[nodiscard]] inline std::string_view
+    to_string(api_route r) {
+        if (r == api_route::UNKNOWN) return "UNKNOWN";
+        auto name = magic_enum::enum_name(r);
+        if (name.empty()) return "Error: Invalid api_route";
+        return name;    
+    }
 
     enum class route_match_type { EXACT, PREFIX };
 
@@ -68,35 +99,100 @@ namespace geecodex::http {
         route_match_type match_type{route_match_type::EXACT};
     };
 
-    template <size_t N>
-    struct static_route_table {
-        std::array<route_info, N> routes;
+    class trie_router {
+    private:
+        struct node {
+            std::map<char, std::unique_ptr<node>> children;
+            std::map<http_method, api_route> exact_match_routes;
+            std::map<http_method, api_route> prefix_match_routes;
+        } m_root;
 
-        template <size_t... I>
-        constexpr static_route_table(const route_info (&init)[N], std::index_sequence<I...>)
-            : routes{init[I]...} {}
-
-        constexpr static_route_table(const route_info (&init)[N])
-            : static_route_table(init, std::make_index_sequence<N>{}) {}
-    
-        api_route find(std::string_view path, http_method method) const {
-            for (const auto& route: routes) { 
-                if (route.match_type == route_match_type::EXACT &&
-                    route.path == path &&
-                    route.method == method) return route.route;
-            }   
+        void add_route(const route_info& route) {
+            node* current = &m_root;
             
-            for (const auto& route: routes) {
-                if (route.match_type == route_match_type::PREFIX && 
-                    path.size() >= route.path.size() && 
-                    path.substr(0, route.path.size()) == route.path &&
-                    route.method == method) return route.route;
+            for (char ch: route.path) {
+                if (current->children.find(ch) == current->children.end())
+                    current->children[ch] = std::make_unique<node>();
+                current = current->children[ch].get();
             }
-            return api_route::UNKNOWN;
+
+            if (route.match_type == route_match_type::EXACT)
+                 current->exact_match_routes[route.method] = route.route;
+            else current->prefix_match_routes[route.method] = route.route;
+        }
+    public:
+        trie_router(const std::initializer_list<route_info>& definitions) {
+            for (const auto& route_def: definitions) add_route(route_def);
+        }
+
+        template <typename Range>
+        explicit trie_router(const Range& definitions) {
+            for (const auto& route_def: definitions) add_route(route_def);
+        }
+
+        [[nodiscard]] api_route find(std::string_view path, http_method method) const {
+            const node* current_node = &m_root;
+            api_route longest_prefix_match = api_route::UNKNOWN;
+
+            if (auto it = m_root.prefix_match_routes.find(method); 
+                it != m_root.prefix_match_routes.end()) longest_prefix_match = it->second;
+
+            const node* node_at_full_path_end = &m_root;
+
+            bool path_fully_traversed_in_trie = true;
+            for (char ch: path) {
+                auto child_it = current_node->children.find(ch);
+                if (child_it == current_node->children.end()) {
+                    path_fully_traversed_in_trie = false;
+                    node_at_full_path_end = nullptr;
+                    break;
+                }
+                current_node = child_it->second.get();
+                node_at_full_path_end = current_node;
+
+                if (auto it = current_node->prefix_match_routes.find(method); 
+                    it != current_node->prefix_match_routes.end()) longest_prefix_match = it->second; 
+            }
+
+            if (path_fully_traversed_in_trie && node_at_full_path_end) 
+                if (auto it = node_at_full_path_end->exact_match_routes.find(method); 
+                    it != node_at_full_path_end->exact_match_routes.end()) return it->second;
+
+            return longest_prefix_match;
         }
     };
 
+
+    // template <size_t N>
+    // struct static_route_table {
+    //     std::array<route_info, N> routes;
+
+    //     template <size_t... I>
+    //     constexpr static_route_table(const route_info (&init)[N], std::index_sequence<I...>)
+    //         : routes{init[I]...} {}
+
+    //     constexpr static_route_table(const route_info (&init)[N])
+    //         : static_route_table(init, std::make_index_sequence<N>{}) {}
+    
+    //     api_route find(std::string_view path, http_method method) const {
+    //         for (const auto& route: routes) { 
+    //             if (route.match_type == route_match_type::EXACT &&
+    //                 route.path == path &&
+    //                 route.method == method) return route.route;
+    //         }   
+            
+    //         for (const auto& route: routes) {
+    //             if (route.match_type == route_match_type::PREFIX && 
+    //                 path.size() >= route.path.size() && 
+    //                 path.substr(0, route.path.size()) == route.path &&
+    //                 route.method == method) return route.route;
+    //         }
+    //         return api_route::UNKNOWN;
+    //     }
+    // };
+
     static constexpr route_info route_definitions[] = {
+        {"/geecodex/feedback",              http_method::POST,  api_route::CLIENT_FEEDBACK },
         {"/geecodex/ai/chat",               http_method::POST,  api_route::AI_CHAT},
         {"/geecodex/hello",                 http_method::GET,   api_route::HELLO},
         {"/geecodex/health",                http_method::GET,   api_route::HEALTH_CHECK},
@@ -106,15 +202,22 @@ namespace geecodex::http {
         {"/geecodex/books/",                http_method::GET,   api_route::DOWNLOAD_PDF,        route_match_type::PREFIX},
         {"/geecodex/app/update_check",      http_method::POST,  api_route::APP_UPDATE_CHECK},
         {"/geecodex/app/download/latest/",  http_method::GET,   api_route::APP_DOWNLOAD_LATEST, route_match_type::PREFIX},        
-        {"/geecodex/feedback",              http_method::POST,  api_route::CLIENT_FEEDBACK },
-        
-        {"/geecodex/math/recognize",        http_method::POST,  api_route::MATH_RECOGNIZE},
+        {"/geecodex/books/comment/",        http_method::POST,  api_route::COMMENT_BOOK,        route_match_type::PREFIX},     
+        {"/geecodex/books/score/",         http_method::POST,  api_route::SCORE_BOOK,          route_match_type::PREFIX},
+        {"/geecodex/recoginize/",          http_method::POST,  api_route::CONTENT_RECOGNIZE},
     };
-    static constexpr auto route_table = static_route_table(route_definitions);
+    //static constexpr auto route_table = static_route_table(route_definitions);
+    
+    inline const trie_router& get_global_route_table() {
+        static const trie_router instance(route_definitions);
+        return instance;
+    }
+    
     /* ----Route Table Parser---- */
-    
-    
+
+
     class http_connection;
+    
 
     void handle_hello(http_connection& conn);
     void handle_health_check(http_connection& conn);
@@ -126,7 +229,11 @@ namespace geecodex::http {
     void handle_download_latest_app(http_connection& conn);
     void handle_fetch_client_feedback(http_connection& conn);
     void handle_ai_chat(http_connection& conn);
-    void handle_math_recognize(http_connection& conn);
+    void handle_content_recognize(http_connection& conn);
+    
+    void handle_score_book(http_connection& conn);
+    void handle_comment_book(http_connection& conn);
+      
     void handle_not_found(http_connection& conn);
 
     using route_handler_func = std::function<void(http_connection&)>;
@@ -141,8 +248,10 @@ namespace geecodex::http {
             {api_route::APP_DOWNLOAD_LATEST, handle_download_latest_app},
             {api_route::CLIENT_FEEDBACK, handle_fetch_client_feedback},
             {api_route::AI_CHAT, handle_ai_chat},
-            {api_route::MATH_RECOGNIZE, handle_math_recognize},
-           {api_route::UNKNOWN, handle_not_found},
+            {api_route::SCORE_BOOK, handle_score_book},
+            {api_route::COMMENT_BOOK, handle_comment_book},
+            {api_route::CONTENT_RECOGNIZE, handle_content_recognize},
+            {api_route::UNKNOWN, handle_not_found},
         };
         return handlers;
     }
