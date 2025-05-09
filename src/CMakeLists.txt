@@ -20,5 +20,6 @@ target_link_libraries(inf_qwq_backend
     Boost::boost
     OpenSSL::SSL
     OpenSSL::Crypto
+    spdlog::spdlog
 )
 

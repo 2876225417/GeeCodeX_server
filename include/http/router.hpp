@@ -162,35 +162,6 @@ namespace geecodex::http {
         }
     };
 
-
-    // template <size_t N>
-    // struct static_route_table {
-    //     std::array<route_info, N> routes;
-
-    //     template <size_t... I>
-    //     constexpr static_route_table(const route_info (&init)[N], std::index_sequence<I...>)
-    //         : routes{init[I]...} {}
-
-    //     constexpr static_route_table(const route_info (&init)[N])
-    //         : static_route_table(init, std::make_index_sequence<N>{}) {}
-    
-    //     api_route find(std::string_view path, http_method method) const {
-    //         for (const auto& route: routes) { 
-    //             if (route.match_type == route_match_type::EXACT &&
-    //                 route.path == path &&
-    //                 route.method == method) return route.route;
-    //         }   
-            
-    //         for (const auto& route: routes) {
-    //             if (route.match_type == route_match_type::PREFIX && 
-    //                 path.size() >= route.path.size() && 
-    //                 path.substr(0, route.path.size()) == route.path &&
-    //                 route.method == method) return route.route;
-    //         }
-    //         return api_route::UNKNOWN;
-    //     }
-    // };
-
     static constexpr route_info route_definitions[] = {
         {"/geecodex/feedback",              http_method::POST,  api_route::CLIENT_FEEDBACK },
         {"/geecodex/ai/chat",               http_method::POST,  api_route::AI_CHAT},
@@ -206,7 +177,6 @@ namespace geecodex::http {
         {"/geecodex/books/score/",         http_method::POST,  api_route::SCORE_BOOK,          route_match_type::PREFIX},
         {"/geecodex/recoginize/",          http_method::POST,  api_route::CONTENT_RECOGNIZE},
     };
-    //static constexpr auto route_table = static_route_table(route_definitions);
     
     inline const trie_router& get_global_route_table() {
         static const trie_router instance(route_definitions);

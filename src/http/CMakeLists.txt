@@ -24,8 +24,9 @@ add_library(http
 target_link_libraries(http
     PRIVATE
     Boost::boost
-
+    spdlog::spdlog
     # ${OpenCV_LIBS}
+    spdlog::spdlog
 )
 
 

@@ -102,7 +102,6 @@ private:
     http::response<http::string_body>   m_response;
     bool                                m_response_sent;
 
-
     template <class BodyType>
     void send_response_impl(http::response<BodyType>&& response_to_send, const char* response_description) {
         if (m_response_sent) {
@@ -133,7 +132,7 @@ private:
                     self->m_socket.shutdown(tcp::socket::shutdown_send, shutdown_ec);
                     if (shutdown_ec && shutdown_ec != beast::errc::not_connected) 
                         std::cerr << "Error shutting down socket send: " << shutdown_ec.message() << '\n';
-                    else if (!shutdown_ec) { /* Optional: Successfully Response */}
+                    else if (!shutdown_ec) { /* Optional: Success Response */ }
                 } catch (const std::exception& e) {
                     std::cerr << "Exception in " << response_description_str << " send completion handler: " << e.what() << '\n';
                 } catch (...) {

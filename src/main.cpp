@@ -6,6 +6,7 @@
 // | Hubei Engineering University |
 // |------------------------------|
 
+#include "spdlog/spdlog.h"
 #include <csignal>
 #include <database/db_ops.hpp>
 #include <http/http_server.h>
@@ -18,6 +19,7 @@
 #include <atomic>
 #include <memory>
 #include <vector>
+#include <utils/logger.hpp>
 
 /*** Launch Params
  *   1. Server
@@ -35,17 +37,20 @@
  */
 
 int main(int argc, char* argv[]) {    
+    geecodex::logger::setup_logger();
+
     using namespace geecodex::database;
     using namespace geecodex::http;
-                            
+                       
     if (argc != 8) {
-        std::cerr << "Usage: " << argv[0] 
-                  << " <address> <port> <db_host> <db_port> <db_name> <db_user> <db_pwd> \n"
-                  << "Example: " << argv[0] 
-                  << " 0.0.0.0 8080 localhost 5432 geecodex ppqwqqq **********";
+        SPDLOG_ERROR("Usage: {} <address> <port> <db_host> <db_port> <db_name> <db_user> <db_pwd>", argv[0]);
+        SPDLOG_ERROR("Example: {} 0.0.0.0 8080 localhost 5432 geecodex ppqwqqq **********", argv[0]);
         return EXIT_FAILURE;
     }
-                    
+    
+    SPDLOG_INFO("Server starting with the following arguments: ");
+    for (int i = 0; i < argc; i++) SPDLOG_INFO("    argv[{}]: {}", i, argv[i]);
+
     connection_config config{ argv[3]
                             , static_cast<unsigned short>(std::atoi(argv[4]))
                             , argv[5]
@@ -56,25 +61,29 @@ int main(int argc, char* argv[]) {
     try {
         auto& db = pg_connection::get_instance(config);
         if (!db.is_initialized()) {
-            std::cerr << "Failed to initialize database connection" << std::endl;
+            SPDLOG_CRITICAL("Failed to initialize database connection");
             return EXIT_FAILURE;
         }
-        std::cout << "Database connection initialized successfully" << std::endl;
+        SPDLOG_INFO("Database connection initialized successfully");
 
         auto const address = geecodex::http::net::ip::make_address(argv[1]);
         unsigned short port = static_cast<unsigned short>(std::atoi(argv[2]));
 
-        net::io_context ioc{1};
+        net::io_context ioc{2}; // Concurrenct Hint
         http_server server{ioc, {address, port}};
         
-        std::cout << "HTTP server started at " << argv[1] << ":" << argv[2] << '\n'
-                  << "Press Ctrl+C to stop the server" << '\n';
+        SPDLOG_INFO("HTTP server started at {}:{}", argv[1], argv[2]);
+        SPDLOG_INFO("Press Ctrl+C to stop the server");
+        
         server.run();
         ioc.run();
+
+        SPDLOG_INFO("Server shutdown gracefully.");
     } catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
+        SPDLOG_CRITICAL("Unhandled exception in main: {}", e.what());
         return EXIT_FAILURE;
     }
 
+    spdlog::shutdown();
     return EXIT_SUCCESS;
 }
