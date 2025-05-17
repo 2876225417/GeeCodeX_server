@@ -179,7 +179,7 @@ private:
             http_method method = enum2method(m_request.method());
             api_route route = get_global_route_table().find(target, method);
         
-            std::cout << "Route matched: " << geecodex::http::api2string(route) 
+            std::cout << "Route matched: " << geecodex::http::to_string(route) 
                       << " (Enum value: " << static_cast<int>(route) << ") " << std::endl;
 
             m_response.set(http::field::server, "GeeCodeX");
