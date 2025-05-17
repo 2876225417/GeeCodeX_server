@@ -1,5 +1,15 @@
 cmake_minimum_required(VERSION 3.16)
 
+
+option(USE_CLANG "Compile with Clang C/C++ compiler" OFF)
+if(USE_CLANG)
+    set(CMAKE_C_COMPILER clang)
+    set(CMAKE_CXX_COMPILER clang++)
+    message(STATUS "Compiler set to Clang.")
+else()
+    message(STATUS "Using default system compiler.")
+endif()
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -7,12 +17,11 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 project(inf_qwq_backend LANGUAGES CXX)
 
-
 include(FetchContent)
 FetchContent_Declare(
     spdlog
     GIT_REPOSITORY https://github.com/gabime/spdlog.git
-    GIT_TAG v1.15.2
+    GIT_TAG v1.15.3
 )
 FetchContent_MakeAvailable(spdlog)
 

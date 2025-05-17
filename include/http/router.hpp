@@ -3,6 +3,12 @@
 #ifndef ROUTER_HPP
 #define ROUTER_HPP
 
+
+#include <http/router_defs.hpp>
+#include <http/routes_app.hpp>
+#include <http/routes_books.hpp>
+#include <http/routes_general.hpp>
+
 #include <boost/beast/core.hpp>
 #include <boost/beast/core/error.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
@@ -22,82 +28,12 @@
 #include <magic_enum.hpp>
 #include <map>
 #include <memory>
+#include <unordered_map>
 
 namespace geecodex::http {
     namespace beast = boost::beast;
     namespace http  = beast::http;
-    namespace net   = boost::asio;
     using tcp       = boost::asio::ip::tcp;
-
-    /* ----Route Table Parser---- */
-    enum class http_method {
-        GET,
-        POST,
-        PUT,
-        DELETE,
-        UNKNOWN
-    };
-
-    [[nodiscard]] constexpr http_method enum2method(http::verb method) {
-        switch (method) {
-            case http::verb::get:       return http_method::GET;
-            case http::verb::post:      return http_method::POST;
-            case http::verb::put:       return http_method::PUT;
-            case http::verb::delete_:   return http_method::DELETE;
-            default:                    return http_method::UNKNOWN;
-        }
-    }
-
-    [[nodiscard]] constexpr std::string_view to_string(http_method m) {
-        switch(m) {
-            case http_method::GET:      return "GET";
-            case http_method::POST:     return "POST";
-            case http_method::PUT:      return "PUT";
-            case http_method::DELETE:   return "DELETE";
-            case http_method::UNKNOWN:  return "UNKNOWN METHOD";
-        }
-        return "Error: Invalid http_method";
-    }
-
-    enum class api_route {
-        HELLO,
-        HEALTH_CHECK,
-        
-        DOWNLOAD_PDF,
-        
-        FETCH_ALL_PDF_INFO,
-        FETCH_PDF_COVER,
-        FETCH_LATEST_BOOKS,
-
-        APP_UPDATE_CHECK,
-        APP_DOWNLOAD_LATEST,
-        
-        CLIENT_FEEDBACK,
-        AI_CHAT,
-        
-        COMMENT_BOOK,
-        SCORE_BOOK,
-        
-        CONTENT_RECOGNIZE,
-        UNKNOWN
-    };
-
-    [[nodiscard]] inline std::string_view
-    to_string(api_route r) {
-        if (r == api_route::UNKNOWN) return "UNKNOWN";
-        auto name = magic_enum::enum_name(r);
-        if (name.empty()) return "Error: Invalid api_route";
-        return name;    
-    }
-
-    enum class route_match_type { EXACT, PREFIX };
-
-    struct route_info {
-        std::string_view path;
-        http_method method;
-        api_route route;
-        route_match_type match_type{route_match_type::EXACT};
-    };
 
     class trie_router {
     private:
@@ -121,12 +57,11 @@ namespace geecodex::http {
             else current->prefix_match_routes[route.method] = route.route;
         }
     public:
-        trie_router(const std::initializer_list<route_info>& definitions) {
-            for (const auto& route_def: definitions) add_route(route_def);
+        explicit trie_router(const std::vector<route_info>& all_definitions) {
+            for (const auto& route_def: all_definitions) add_route(route_def);
         }
 
-        template <typename Range>
-        explicit trie_router(const Range& definitions) {
+        trie_router(const std::initializer_list<route_info>& definitions) {
             for (const auto& route_def: definitions) add_route(route_def);
         }
 
@@ -161,69 +96,41 @@ namespace geecodex::http {
             return longest_prefix_match;
         }
     };
-
-    static constexpr route_info route_definitions[] = {
-        {"/geecodex/feedback",              http_method::POST,  api_route::CLIENT_FEEDBACK },
-        {"/geecodex/ai/chat",               http_method::POST,  api_route::AI_CHAT},
-        {"/geecodex/hello",                 http_method::GET,   api_route::HELLO},
-        {"/geecodex/health",                http_method::GET,   api_route::HEALTH_CHECK},
-        // Precise match should be forward than less precise
-        {"/geecodex/books/latest",          http_method::GET,   api_route::FETCH_LATEST_BOOKS},
-        {"/geecodex/books/cover/",          http_method::GET,   api_route::FETCH_PDF_COVER,     route_match_type::PREFIX},
-        {"/geecodex/books/",                http_method::GET,   api_route::DOWNLOAD_PDF,        route_match_type::PREFIX},
-        {"/geecodex/app/update_check",      http_method::POST,  api_route::APP_UPDATE_CHECK},
-        {"/geecodex/app/download/latest/",  http_method::GET,   api_route::APP_DOWNLOAD_LATEST, route_match_type::PREFIX},        
-        {"/geecodex/books/comment/",        http_method::POST,  api_route::COMMENT_BOOK,        route_match_type::PREFIX},     
-        {"/geecodex/books/score/",         http_method::POST,  api_route::SCORE_BOOK,          route_match_type::PREFIX},
-        {"/geecodex/recoginize/",          http_method::POST,  api_route::CONTENT_RECOGNIZE},
-    };
     
     inline const trie_router& get_global_route_table() {
-        static const trie_router instance(route_definitions);
+        static const trie_router instance = []{
+            std::vector<route_info> all_definitions;
+            
+            auto general_defs = get_general_route_definitions();
+            all_definitions.insert(all_definitions.end(), general_defs.begin(), general_defs.end());
+
+            auto book_defs = get_book_route_definitions();
+            all_definitions.insert(all_definitions.end(), book_defs.begin(), book_defs.end());
+
+            auto app_defs = get_app_route_definitions();
+            all_definitions.insert(all_definitions.end(), app_defs.begin(), app_defs.end());
+
+            return trie_router(all_definitions);
+        }();
+
         return instance;
     }
     
-    /* ----Route Table Parser---- */
-
-
-    class http_connection;
-    
-
-    void handle_hello(http_connection& conn);
-    void handle_health_check(http_connection& conn);
-    void handle_download_file(http_connection& conn);
-    void handle_download_pdf(http_connection& conn);
-    void handle_fetch_pdf_cover(http_connection& conn);
-    void handle_fetch_latest_books(http_connection& conn);
-    void handle_app_update_check(http_connection& conn);
-    void handle_download_latest_app(http_connection& conn);
-    void handle_fetch_client_feedback(http_connection& conn);
-    void handle_ai_chat(http_connection& conn);
-    void handle_content_recognize(http_connection& conn);
-    
-    void handle_score_book(http_connection& conn);
-    void handle_comment_book(http_connection& conn);
-      
     void handle_not_found(http_connection& conn);
 
-    using route_handler_func = std::function<void(http_connection&)>;
     inline const std::unordered_map<api_route, route_handler_func>& get_route_handlers() {
-        static const std::unordered_map<api_route, route_handler_func> handlers = {
-            {api_route::HELLO, handle_hello},
-            {api_route::HEALTH_CHECK, handle_health_check},
-            {api_route::DOWNLOAD_PDF, handle_download_pdf},
-            {api_route::FETCH_PDF_COVER, handle_fetch_pdf_cover},
-            {api_route::FETCH_LATEST_BOOKS, handle_fetch_latest_books},
-            {api_route::APP_UPDATE_CHECK, handle_app_update_check},
-            {api_route::APP_DOWNLOAD_LATEST, handle_download_latest_app},
-            {api_route::CLIENT_FEEDBACK, handle_fetch_client_feedback},
-            {api_route::AI_CHAT, handle_ai_chat},
-            {api_route::SCORE_BOOK, handle_score_book},
-            {api_route::COMMENT_BOOK, handle_comment_book},
-            {api_route::CONTENT_RECOGNIZE, handle_content_recognize},
-            {api_route::UNKNOWN, handle_not_found},
-        };
+        static const std::unordered_map<api_route, route_handler_func>& handlers = []{
+            std::unordered_map<api_route, route_handler_func> collected_handlers;
+
+            register_general_handlers(collected_handlers);
+            register_book_handlers(collected_handlers);
+            register_app_handlers(collected_handlers);
+            
+            return collected_handlers;
+        }();
         return handlers;
     }
+
+
 }
 #endif // ROUTER_HPP
