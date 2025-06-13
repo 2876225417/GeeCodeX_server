@@ -1,0 +1,38 @@
+# --- 编译指令 ---
+CompileFlags:
+    CompilationDatabase: build
+
+    FallbackFlags:
+        -std=c++23
+
+# --- 索引编制 ---
+Index:
+    Background: Build
+    
+    StandardLibrary: Yes
+
+    External: Yes
+
+# --- 代码补全 ---
+Completion:
+    # 获取来自所有作用域中的符号
+    # AllScopes: Yes
+
+    InsertIncludes: Auto
+
+    # Snippets: Yes
+
+# --- 诊断与静态分析 ---
+Diagnostics:
+    ClangTidy:
+        Add:
+            modernize-*
+            readability-*
+
+    UnusedIncludes: Yes
+    MissingIncludes: Yes
+
+InlayHints:
+    Enabled: Yes
+    ParameterNames: Enabled
+    DeducedTypes: Enabled

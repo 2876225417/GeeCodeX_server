@@ -38,5 +38,5 @@ inline void register_general_handlers(std::unordered_map<api_route, route_handle
     handlers[api_route::CONTENT_RECOGNIZE] = handle_content_recognize;
 }
 
-}   // NAMESPACE GEECODEX::HTTP
+} // namespace geecodex::http
 #endif // ROUTES_GENERAL_HPP
