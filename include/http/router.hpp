@@ -49,6 +49,7 @@ public:
     struct match_result {
         api_route route = api_route::UNKNOWN;
         std::map<std::string, std::string> params;
+        const std::map<http_method, api_route>* handlers = nullptr;
     };
 
 private:
@@ -64,17 +65,19 @@ private:
         std::map<http_method, api_route> handlers;
     } m_root;
 
-    static std::vector<std::string_view> split_path(std::string_view path) {
+    static auto split_path(std::string_view path) -> std::vector<std::string_view>  {
         std::vector<std::string_view> segments;
         if (path.empty() || path == "/") return segments;
         
         size_t start = (path.front() == '/') ? 1 : 0;
+        size_t end_adjust = (path.length() > 1 && path.back() == '/') ? 1 : 0;
+        size_t path_len = path.length() - end_adjust;
         size_t end   = start;
 
-        while (start < path.length()) {
+        while (start < path_len) {
             end = path.find('/', start);
-            if (end == std::string_view::npos) {
-                segments.push_back(path.substr(start));
+            if (end == std::string_view::npos || end >= path_len) {
+                segments.push_back(path.substr(start, path_len - start));
                 break;
             }
             segments.push_back(path.substr(start, end - start));
@@ -87,7 +90,8 @@ private:
         node* current = &m_root;
         auto segments = split_path(route.path);
         
-        for (const auto& segment: segments) {
+        for (size_t i = 0; i < segments.size(); ++i) {
+            const auto& segment = segments[i];
             if (segment.empty()) continue;
 
             if (segment.front() == ':') {
@@ -95,14 +99,19 @@ private:
                     SPDLOG_ERROR("Invalid route parameter in path: {}", route.path);
                     return;
                 }
+
                 if (current->param_child == nullptr) {
-                    current->param_child->param_name = std::string(segment.substr(1));
+                    current->param_child = std::make_unique<node>();
                 }
                 current->param_child->param_name = std::string(segment.substr(1));
                 current = current->param_child.get();
             } else if (segment.front() == '*') {
                 if (segment.length() < 2) {
                     SPDLOG_ERROR("Invalid wildcard parameter in path: {}", route.path);
+                    return;
+                }
+                if (i != segment.size() - 1) {
+                    SPDLOG_ERROR("Wildcard '*' must be at the end of part: {}", route.path);
                     return;
                 }
                 if (current->wildcard_child == nullptr) {
@@ -118,21 +127,25 @@ private:
                 current = child_node.get();
             }
         }
-    
         if (route.match_type == route_match_type::PREFIX) {
-            SPDLOG_WARN("PREFIX match_type is not fully supported with dynamic routing and is treated as EXACT for path structure: {}", route.path);
-        }
-        current->handlers[route.method] = route.route;
+            if (current->wildcard_child == nullptr) 
+                current->wildcard_child = std::make_unique<node>();
+
+            current->wildcard_child->wildcard_name = "filepath";
+            current->wildcard_child->handlers[route.method] = route.route;
+        } else current->handlers[route.method] = route.route;
     }
 
-    bool find_recursive(const node* current, const std::vector<std::string_view> segments, size_t depth, match_result& result) const {
+    auto find_recursive(const node* current, const std::vector<std::string_view> segments, size_t depth, match_result& result) const -> bool {
         if (depth == segments.size()) {
             if (!current->handlers.empty()) {
-                result.route = api_route::UNKNOWN;
+                result.handlers = &current->handlers;
                 return true;
             }
-            if (current == &m_root && segments.empty() && !current->handlers.empty()) {
-                result.route = api_route::UNKNOWN;
+            // 允许无通配符匹配 /books/cover/ books/cover
+            if (current->wildcard_child && !current->wildcard_child->handlers.empty()) {
+                result.params[current->wildcard_child->wildcard_name] = "";
+                result.handlers = &current->wildcard_child->handlers;
                 return true;
             }
             return false;
@@ -149,7 +162,7 @@ private:
 
         if (current->param_child) {
             result.params[current->param_child.get()->param_name] = std::string(segment);
-            if (find_recursive(current->param_child.get(), segments, depth + 1, result));
+            if (find_recursive(current->param_child.get(), segments, depth + 1, result))
                 return true;
             result.params.erase(current->param_child->param_name);
         }
@@ -157,13 +170,11 @@ private:
         if (current->wildcard_child) {
             std::string remaining_path;
             for (size_t i = depth; i < segments.size(); ++i) {
+                if (i > depth) remaining_path += '/';
                 remaining_path += segments[i];
-                if (i < segments.size() - 1) {
-                    remaining_path += '/';
-                }
             }
             result.params[current->wildcard_child->wildcard_name] = remaining_path;
-            result.route = api_route::UNKNOWN;
+            result.handlers = &current->wildcard_child->handlers;
             return true;
         }
         return false;
@@ -182,35 +193,22 @@ public:
         SPDLOG_DEBUG("TrieRouter construction from initializer_list complete");
     }
 
-    [[nodiscard]] match_result find(std::string_view path, http_method method) const {
+    [[nodiscard]] auto find(std::string_view path, http_method method) const -> match_result {
         match_result result;
-        auto segments = split_path(path);
-        const node* current = &m_root;
 
         if (path == "/") {
-            auto it = current->handlers.find(method);
-            if (it != current->handlers.end()) result.route = it->second;
+            auto it = m_root.handlers.find(method);
+            if (it != m_root.handlers.end()) result.route = it->second;
             return result;
         }
 
+        auto segments = split_path(path);
+        
         if (find_recursive(&m_root, segments, 0, result)) {
-            const node* final_node = &m_root;
-            for (const auto& segment: segments) {
-                auto it = final_node->children.find(std::string(segment));
-                if (it != final_node->children.end()) final_node = it->second.get();
-                else if (final_node->param_child) final_node = final_node->param_child.get();
-                else if (final_node->wildcard_child) { 
-                    final_node = final_node->wildcard_child.get();
-                    break;
-                } else {
-                    final_node = nullptr;
-                    break;
-                }
-            }
-
-            if (final_node) {
-                auto handler_it = final_node->handlers.find(method);
-                if (handler_it != final_node->handlers.end()) result.route = handler_it->second;
+            if (result.handlers) {
+                auto handler_it = result.handlers->find(method);
+                if (handler_it != result.handlers->end()) 
+                    result.route = handler_it->second;
             }
         }
         return result;
@@ -218,7 +216,7 @@ public:
 };
 
     
-inline const trie_router& get_global_route_table() {
+inline auto get_global_route_table() -> const trie_router& {
     static const trie_router instance = []{
         std::vector<route_info> all_definitions;
         
@@ -260,7 +258,7 @@ inline const trie_router& get_global_route_table() {
     
 void handle_not_found(http_connection& conn);
 
-inline const std::unordered_map<api_route, route_handler_func>& get_route_handlers() {
+inline auto get_route_handlers() -> const std::unordered_map<api_route, route_handler_func>& {
     static const std::unordered_map<api_route, route_handler_func>& handlers = []{
         std::unordered_map<api_route, route_handler_func> collected_handlers;
 

@@ -32,10 +32,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBPQXX REQUIRED libpqxx)
 message(STATUS "Building with PGSQL support")
 
-
-
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
-
 
 include_directories(
     ${CMAKE_SOURCE_DIR}/include
