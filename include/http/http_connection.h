@@ -102,6 +102,7 @@ private:
     http::request<http::string_body>    m_request;
     http::response<http::string_body>   m_response;
     bool                                m_response_sent;
+    std::map<std::string, std::string>  m_path_params;
 
     template <class BodyType>
     void send_response_impl(http::response<BodyType>&& response_to_send, const char* response_description) {
@@ -177,8 +178,11 @@ private:
                       << " " << target << std::endl;
 
             http_method method = enum2method(m_request.method());
-            api_route route = get_global_route_table().find(target, method);
-        
+            auto match = get_global_route_table().find(target, method);
+            api_route route = match.route;
+            this->m_path_params = match.params;
+            
+            
             std::cout << "Route matched: " << geecodex::http::to_string(route) 
                       << " (Enum value: " << static_cast<int>(route) << ") " << std::endl;
 

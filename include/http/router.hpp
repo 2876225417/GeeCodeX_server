@@ -183,34 +183,37 @@ public:
     }
 
     [[nodiscard]] match_result find(std::string_view path, http_method method) const {
-        const node* current_node = &m_root;
-        api_route longest_prefix_match = api_route::UNKNOWN;
+        match_result result;
+        auto segments = split_path(path);
+        const node* current = &m_root;
 
-        if (auto it = m_root.prefix_match_routes.find(method); 
-            it != m_root.prefix_match_routes.end()) longest_prefix_match = it->second;
-
-        const node* node_at_full_path_end = &m_root;
-
-        bool path_fully_traversed_in_trie = true;
-        for (char ch: path) {
-            auto child_it = current_node->children.find(ch);
-            if (child_it == current_node->children.end()) {
-                path_fully_traversed_in_trie = false;
-                node_at_full_path_end = nullptr;
-                break;
-            }
-            current_node = child_it->second.get();
-            node_at_full_path_end = current_node;
-
-            if (auto it = current_node->prefix_match_routes.find(method); 
-                it != current_node->prefix_match_routes.end()) longest_prefix_match = it->second; 
+        if (path == "/") {
+            auto it = current->handlers.find(method);
+            if (it != current->handlers.end()) result.route = it->second;
+            return result;
         }
 
-        if (path_fully_traversed_in_trie && node_at_full_path_end) 
-            if (auto it = node_at_full_path_end->exact_match_routes.find(method); 
-                it != node_at_full_path_end->exact_match_routes.end()) return it->second;
+        if (find_recursive(&m_root, segments, 0, result)) {
+            const node* final_node = &m_root;
+            for (const auto& segment: segments) {
+                auto it = final_node->children.find(std::string(segment));
+                if (it != final_node->children.end()) final_node = it->second.get();
+                else if (final_node->param_child) final_node = final_node->param_child.get();
+                else if (final_node->wildcard_child) { 
+                    final_node = final_node->wildcard_child.get();
+                    break;
+                } else {
+                    final_node = nullptr;
+                    break;
+                }
+            }
 
-        return longest_prefix_match;
+            if (final_node) {
+                auto handler_it = final_node->handlers.find(method);
+                if (handler_it != final_node->handlers.end()) result.route = handler_it->second;
+            }
+        }
+        return result;
     }
 };
 

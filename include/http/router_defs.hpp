@@ -59,6 +59,7 @@ to_string(http_method m) {
         case http_method::UNKNOWN:
         defualt:                    return "UNKNOWN METHOD";
     }
+    return "UNKNOWN METHOD";
 }
 
 enum class api_route {
