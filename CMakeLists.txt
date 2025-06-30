@@ -38,13 +38,11 @@ pretty_message(STATUS "")
 
 dependency_manager_init()
 
-
-find_dependency(spdlog REQUIRED)
+find_dependency(spdlog  REQUIRED)
+find_dependency(OpenSSL REQUIRED)
+find_dependency(Boost   REQUIRED)
+find_dependency(nlohmann_json REQUIRED)
 find_dependency(libpqxx REQUIRED)
-
-include_directories(
-    ${CMAKE_SOURCE_DIR}/include
-)
 
 add_subdirectory(src)
 

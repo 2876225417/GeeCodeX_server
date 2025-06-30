@@ -1,6 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
 
-find_package(Boost REQUIRED)
 
 FILE(GLOB HTTP_HEADER ${CMAKE_SOURCE_DIR}/include/http/*.h)
 FILE(GLOB HTTP_TEMPLATE ${CMAKE_SOURCE_DIR}/include/http/*.hpp)

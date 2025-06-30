@@ -7,5 +7,7 @@ formula_rec/formula_rec
 3rdparty/boost/
 3rdparty/libpqxx/
 3rdparty/spdlog/
+3rdparty/openssl/
+3rdparty/nlohmann_json/
 3rdparty/source/
 3rdparty/logs/
