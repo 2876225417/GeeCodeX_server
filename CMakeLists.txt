@@ -42,6 +42,7 @@ find_dependency(spdlog  REQUIRED)
 find_dependency(OpenSSL REQUIRED)
 find_dependency(Boost   REQUIRED)
 find_dependency(nlohmann_json REQUIRED)
+find_dependency(magic_enum REQUIRED)
 find_dependency(libpqxx REQUIRED)
 
 add_subdirectory(src)

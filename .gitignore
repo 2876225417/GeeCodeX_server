@@ -8,6 +8,7 @@ formula_rec/formula_rec
 3rdparty/libpqxx/
 3rdparty/spdlog/
 3rdparty/openssl/
+3rdparty/magic_enum/
 3rdparty/nlohmann_json/
 3rdparty/source/
 3rdparty/logs/
