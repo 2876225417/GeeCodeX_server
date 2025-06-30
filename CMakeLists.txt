@@ -1,41 +1,54 @@
 cmake_minimum_required(VERSION 3.16)
 
+project(geecodex_server LANGUAGES CXX VERSION 0.0.1)
 
-option(USE_CLANG "Compile with Clang C/C++ compiler" OFF)
-if(USE_CLANG)
-    set(CMAKE_C_COMPILER clang)
-    set(CMAKE_CXX_COMPILER clang++)
-    message(STATUS "Compiler set to Clang.")
-else()
-    message(STATUS "Using default system compiler.")
-endif()
-
-
-set(CMAKE_C_STANDARD 23)
-set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_C_STANDARD 23)
+set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+if (NOT CMAKE_BUILD_TYPE)
+set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build Type" FORCE)
+endif()
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-project(geecodex_server LANGUAGES CXX)
+include(cmake/Config.cmake)
 
-include(FetchContent)
-FetchContent_Declare(
-    spdlog
-    GIT_REPOSITORY https://github.com/gabime/spdlog.git
-    GIT_TAG v1.15.3
-)
-FetchContent_MakeAvailable(spdlog)
+pretty_message(VINFO_BANNER "Configuring Project" "=" ${BANNER_WIDTH})
+pretty_message_kv(VINFO "PROJECT_NAME"                   "${PROJECT_NAME}")
+pretty_message_kv(VINFO "PROJECT_VERSION"                "${PROJECT_VERSION}")
+pretty_message(VINFO_LINE "=" ${BANNER_WIDTH})
+pretty_message(STATUS "")
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBPQXX REQUIRED libpqxx)
-message(STATUS "Building with PGSQL support")
+pretty_message(VINFO_BANNER "Compiler Info" "=" ${BANNER_WIDTH})
+pretty_message_kv(VINFO "CMAKE_GENERATOR"                "${CMAKE_GENERATOR}")
+pretty_message_kv(VINFO "CMAKE_CXX_STANDARD"             "${CMAKE_CXX_STANDARD}")
+pretty_message_kv(VINFO "CMAKE_CXX_COMPILER"             "${CMAKE_CXX_COMPILER}")
+pretty_message_kv(VINFO "CMAKE_CXX_COMPILER_VERSION"     "${CMAKE_CXX_COMPILER_VERSION}")
+pretty_message_kv(VINFO "CMAKE_CXX_BYTE_ORDER"           "${CMAKE_CXX_BYTE_ORDER}")
+pretty_message_kv(VINFO "CMAKE_CXX_COMPILER_ABI"         "${CMAKE_CXX_COMPILER_ABI}")
+pretty_message_kv(VINFO "CMAKE_BUILD_TYPE"               "${CMAKE_BUILD_TYPE}")
+pretty_message_kv(VINFO "CMAKE_RUNTIME_OUTPUT_DIRECTORY" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+pretty_message(VINFO_LINE "=" ${BANNER_WIDTH})
+pretty_message(STATUS "")
+print_pretty_debug_info()
+pretty_message(STATUS "")
+print_project_info_debug_info()
+pretty_message(STATUS "")
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+dependency_manager_init()
+
+
+find_dependency(spdlog REQUIRED)
+find_dependency(libpqxx REQUIRED)
 
 include_directories(
     ${CMAKE_SOURCE_DIR}/include
 )
 
 add_subdirectory(src)
+
+pch_configure()
+setup_project_pch()
+show_pch_stats()
+show_all_modules_summary()
